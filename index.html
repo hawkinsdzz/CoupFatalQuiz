@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Le Duel - Coup Fatal (Base Massive)</title>
+    <title>Le Duel - Coup Fatal (Encyclopédie Stable)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -31,6 +31,12 @@
             background: linear-gradient(125deg, #0f172a, #1e1b4b, #312e81, #0f172a);
             background-size: 400% 400%;
             animation: gradientBG 15s ease infinite;
+            transition: filter 0.5s ease;
+        }
+
+        .sudden-death-bg {
+            background: linear-gradient(125deg, #450a0a, #7f1d1d, #991b1b, #450a0a);
+            animation: gradientBG 2s ease infinite !important;
         }
 
         @keyframes gradientBG {
@@ -60,21 +66,10 @@
         }
 
         .card-glass {
-            background: rgba(30, 41, 59, 0.7);
+            background: rgba(30, 41, 59, 0.85);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        }
-
-        /* Flou Anti-Triche */
-        .blur-content {
-            filter: blur(12px);
-            opacity: 0.5;
-            transition: all 0.3s ease;
-        }
-        .no-blur {
-            filter: blur(0);
-            opacity: 1;
         }
 
         /* Animation Pénalité -2s */
@@ -113,6 +108,27 @@
             100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
         }
 
+        /* Avatar styles */
+        .avatar-container {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 3px solid white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            margin-bottom: -40px;
+            z-index: 20;
+            background-color: #1e293b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .avatar-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         /* Badges Difficulté */
         .badge-Facile { background-color: #22c55e; color: #052e16; }
         .badge-Moyen { background-color: #eab308; color: #422006; }
@@ -126,13 +142,487 @@
     </style>
 </head>
 <body>
-    <div class="bg-animated"></div>
+    <div id="bg-layer" class="bg-animated"></div>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
 
-        // --- Icônes ---
+        // --- CONSTANTES ---
+        const SOUNDS = {
+            CORRECT: { freq: 880, type: 'sine', duration: 0.1 },
+            WRONG: { freq: 150, type: 'sawtooth', duration: 0.3 },
+            JOKER: { freq: 600, type: 'triangle', duration: 0.4 },
+            END: { freq: 100, type: 'triangle', duration: 1 },
+            BEAT_LOW: { freq: 100, type: 'sine', duration: 0.05 },
+            BEAT_HIGH: { freq: 200, type: 'square', duration: 0.05 },
+            UNDO: { freq: 300, type: 'sine', duration: 0.2 }
+        };
+
+        const INITIAL_CATEGORIES = {
+            ALL: "TOUT MÉLANGER",
+            ANIME: "Animés & Mangas",
+            HISTOIRE: "Histoire",
+            GEO: "Géographie",
+            SPORT: "Sport",
+            CINEMA: "Cinéma & Séries",
+            MUSIQUE: "Musique",
+            JEUX: "Jeux Vidéo",
+            SCIENCES: "Sciences & Nature",
+            LITTERATURE: "Littérature & BD"
+        };
+
+        const HISTORY_STORAGE_KEY = 'coup_fatal_question_history_log';
+        const MAX_HISTORY_SIZE = 200;
+
+        // --- DONNEES POUR GENERATEUR (Infinies) ---
+        const DATA_SETS = {
+            COUNTRIES: [
+                ["France", "Paris", "Moyen"], ["Espagne", "Madrid", "Facile"], ["Allemagne", "Berlin", "Facile"], ["Italie", "Rome", "Facile"], 
+                ["Royaume-Uni", "Londres", "Facile"], ["Belgique", "Bruxelles", "Moyen"], ["Suisse", "Berne", "Difficile"], ["Portugal", "Lisbonne", "Moyen"],
+                ["Pays-Bas", "Amsterdam", "Moyen"], ["Grèce", "Athènes", "Moyen"], ["Russie", "Moscou", "Facile"], ["Chine", "Pékin", "Facile"],
+                ["Japon", "Tokyo", "Facile"], ["Corée du Sud", "Séoul", "Moyen"], ["Inde", "New Delhi", "Moyen"], ["Thaïlande", "Bangkok", "Moyen"],
+                ["Vietnam", "Hanoï", "Difficile"], ["Australie", "Canberra", "Difficile"], ["Nouvelle-Zélande", "Wellington", "Expert"], ["USA", "Washington D.C.", "Facile"],
+                ["Canada", "Ottawa", "Moyen"], ["Mexique", "Mexico", "Facile"], ["Brésil", "Brasilia", "Difficile"], ["Argentine", "Buenos Aires", "Moyen"],
+                ["Chili", "Santiago", "Moyen"], ["Colombie", "Bogota", "Difficile"], ["Pérou", "Lima", "Moyen"], ["Égypte", "Le Caire", "Facile"],
+                ["Maroc", "Rabat", "Difficile"], ["Algérie", "Alger", "Moyen"], ["Tunisie", "Tunis", "Facile"], ["Afrique du Sud", "Pretoria", "Expert"],
+                ["Sénégal", "Dakar", "Moyen"], ["Côte d'Ivoire", "Yamoussoukro", "Expert"], ["Kenya", "Nairobi", "Difficile"], ["Turquie", "Ankara", "Difficile"],
+                ["Suède", "Stockholm", "Moyen"], ["Norvège", "Oslo", "Moyen"], ["Finlande", "Helsinki", "Difficile"], ["Danemark", "Copenhague", "Moyen"]
+            ],
+            ELEMENTS: [
+                ["H", "Hydrogène", "Facile"], ["He", "Hélium", "Facile"], ["Li", "Lithium", "Moyen"], ["C", "Carbone", "Facile"], ["N", "Azote", "Moyen"],
+                ["O", "Oxygène", "Facile"], ["F", "Fluor", "Difficile"], ["Ne", "Néon", "Moyen"], ["Na", "Sodium", "Difficile"], ["Mg", "Magnésium", "Moyen"],
+                ["Al", "Aluminium", "Facile"], ["Si", "Silicium", "Moyen"], ["P", "Phosphore", "Difficile"], ["S", "Soufre", "Difficile"], ["Cl", "Chlore", "Moyen"],
+                ["K", "Potassium", "Difficile"], ["Ca", "Calcium", "Moyen"], ["Fe", "Fer", "Facile"], ["Cu", "Cuivre", "Moyen"], ["Zn", "Zinc", "Moyen"],
+                ["Ag", "Argent", "Moyen"], ["Au", "Or", "Facile"], ["Hg", "Mercure", "Difficile"], ["Pb", "Plomb", "Difficile"], ["U", "Uranium", "Moyen"]
+            ],
+            AUTHORS: [
+                ["Les Misérables", "Victor Hugo", "Facile"], ["Notre-Dame de Paris", "Victor Hugo", "Facile"], ["L'Étranger", "Albert Camus", "Moyen"],
+                ["La Peste", "Albert Camus", "Moyen"], ["Madame Bovary", "Gustave Flaubert", "Moyen"], ["Le Rouge et le Noir", "Stendhal", "Difficile"],
+                ["Les Fleurs du Mal", "Charles Baudelaire", "Facile"], ["Une Saison en Enfer", "Arthur Rimbaud", "Difficile"], ["Germinal", "Émile Zola", "Moyen"],
+                ["Nana", "Émile Zola", "Moyen"], ["Vingt mille lieues sous les mers", "Jules Verne", "Facile"], ["Le Tour du monde en 80 jours", "Jules Verne", "Facile"],
+                ["Les Trois Mousquetaires", "Alexandre Dumas", "Facile"], ["Le Comte de Monte-Cristo", "Alexandre Dumas", "Moyen"], ["À la recherche du temps perdu", "Marcel Proust", "Expert"],
+                ["Le Petit Prince", "Antoine de Saint-Exupéry", "Facile"], ["Antigone", "Jean Anouilh", "Difficile"], ["En attendant Godot", "Samuel Beckett", "Expert"],
+                ["Cyrano de Bergerac", "Edmond Rostand", "Moyen"], ["Le Malade imaginaire", "Molière", "Facile"], ["L'Avare", "Molière", "Facile"],
+                ["1984", "George Orwell", "Moyen"], ["Le Seigneur des Anneaux", "J.R.R. Tolkien", "Facile"], ["Harry Potter", "J.K. Rowling", "Facile"]
+            ]
+        };
+
+        // --- LISTE STATIQUE MASSIVE (Culture G, Histoire, Sport, etc.) ---
+        const BASE_QUESTIONS = [
+            // === ANIMES & MANGAS ===
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quel est le nom du héros de One Piece ?", answer: "Luffy" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quel est le prénom de Goku ?", answer: "Son Goku" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quel Pokémon est jaune et lance des éclairs ?", answer: "Pikachu" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Dans Naruto, quel est le nom du village caché des feuilles ?", answer: "Konoha" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Comment s'appelle le cahier de la mort dans Death Note ?", answer: "Le Death Note" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Dans l'Attaque des Titans, que mangent les Titans ?", answer: "Des humains" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Quel est le nom du studio de Miyazaki ?", answer: "Studio Ghibli" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Quel pirate de l'espace a une cicatrice au visage ?", answer: "Albator" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Qui est le frère d'Edward Elric ?", answer: "Alphonse" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Quel est le nom du robot géant piloté par Actarus ?", answer: "Goldorak" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Quel est le vrai nom de L dans Death Note ?", answer: "L Lawliet" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Dans One Piece, quel est le nom de l'épée maudite de Zoro ?", answer: "Sandai Kitetsu" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quel est le fruit du démon de Luffy ?", answer: "Gomu Gomu no Mi" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Qui est l'auteur de Dragon Ball ?", answer: "Akira Toriyama" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Dans quel anime trouve-t-on le Titan Colossal ?", answer: "L'Attaque des Titans" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Quel est le nom du père de Naruto ?", answer: "Minato Namikaze" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Dans Bleach, quel est le nom du zanpakuto d'Ichigo ?", answer: "Zangetsu" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Quel est le nom du vaisseau de Spike Spiegel ?", answer: "Swordfish 2" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Qui est le personnage principal de My Hero Academia ?", answer: "Izuku Midoriya" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Quel est le nom du démon renard à 9 queues ?", answer: "Kyûbi (Kurama)" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Comment s'appelle la soeur de Tanjiro ?", answer: "Nezuko" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Qui est le créateur de One Piece ?", answer: "Eiichiro Oda" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quelle couleur sont les cheveux de Bulma ?", answer: "Bleu" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Quel est le prénom de Light dans Death Note ?", answer: "Light" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Qui est le rival de Sacha dans Pokémon ?", answer: "Régis" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Quel est le numéro de C-18 ?", answer: "18" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Dans One Punch Man, quel est le rang de Saitama au début ?", answer: "Classe C" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Qui est le père de Gon Freecss ?", answer: "Ging Freecss" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Quel est le nom du titan d'Armin ?", answer: "Le Titan Colossal" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Qui a mangé le fruit du feu dans One Piece ?", answer: "Ace" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Quel est le nom du Stand de Jotaro ?", answer: "Star Platinum" },
+            { category: "Animés & Mangas", difficulty: "Facile", question: "Quel animal est Chopper ?", answer: "Un renne" },
+            { category: "Animés & Mangas", difficulty: "Moyen", question: "Qui est le maître de Goku enfant ?", answer: "Tortue Géniale" },
+            { category: "Animés & Mangas", difficulty: "Difficile", question: "Quel est le nom de l'épée de Guts ?", answer: "Dragon Slayer" },
+            { category: "Animés & Mangas", difficulty: "Expert", question: "Quel est le nom de la forme finale de Freezer ?", answer: "Golden Freezer" },
+
+            // --- HISTOIRE ---
+            { category: "Histoire", difficulty: "Facile", question: "Qui était le 'Roi Soleil' ?", answer: "Louis 14" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui a découvert l'Amérique en 1492 ?", answer: "Christophe Colomb" },
+            { category: "Histoire", difficulty: "Facile", question: "En quelle année a commencé la Révolution française ?", answer: "1789" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quelle année marque la chute du Mur de Berlin ?", answer: "1989" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quel empereur français est mort à Sainte-Hélène ?", answer: "Napoléon 1er" },
+            { category: "Histoire", difficulty: "Difficile", question: "Qui a construit la Tour Eiffel ?", answer: "Gustave Eiffel" },
+            { category: "Histoire", difficulty: "Difficile", question: "Quelle guerre a opposé le Nord et le Sud des USA ?", answer: "La guerre de Sécession" },
+            { category: "Histoire", difficulty: "Expert", question: "En quelle année Charlemagne a-t-il été sacré empereur ?", answer: "800" },
+            { category: "Histoire", difficulty: "Expert", question: "Qui était le premier roi des Francs ?", answer: "Clovis" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui a été le premier président de la 5e République ?", answer: "Charles de Gaulle" },
+            { category: "Histoire", difficulty: "Facile", question: "Quelle guerre s'est terminée en 1945 ?", answer: "La 2e Guerre Mondiale" },
+            { category: "Histoire", difficulty: "Moyen", question: "Qui était la femme de Louis 16 ?", answer: "Marie-Antoinette" },
+            { category: "Histoire", difficulty: "Moyen", question: "Qui a inventé l'imprimerie ?", answer: "Gutenberg" },
+            { category: "Histoire", difficulty: "Difficile", question: "Qui a peint le plafond de la Chapelle Sixtine ?", answer: "Michel-Ange" },
+            { category: "Histoire", difficulty: "Difficile", question: "En quelle année a eu lieu la bataille de Waterloo ?", answer: "1815" },
+            { category: "Histoire", difficulty: "Expert", question: "Quel traité a mis fin à la 1ère Guerre Mondiale ?", answer: "Traité de Versailles" },
+            { category: "Histoire", difficulty: "Facile", question: "Quel pays a offert la Statue de la Liberté aux USA ?", answer: "La France" },
+            { category: "Histoire", difficulty: "Moyen", question: "Qui a prononcé l'appel du 18 juin ?", answer: "Général de Gaulle" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quel est le nom du bateau de Christophe Colomb ?", answer: "La Santa Maria" },
+            { category: "Histoire", difficulty: "Difficile", question: "Qui était le chef des Huns ?", answer: "Attila" },
+            { category: "Histoire", difficulty: "Expert", question: "Quel roi de France a régné le plus longtemps ?", answer: "Louis 14" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quelle ville a été détruite par le Vésuve ?", answer: "Pompéi" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui a marché le premier sur la Lune ?", answer: "Neil Armstrong" },
+            { category: "Histoire", difficulty: "Difficile", question: "Quel président américain a aboli l'esclavage ?", answer: "Abraham Lincoln" },
+            { category: "Histoire", difficulty: "Expert", question: "En quelle année est mort Napoléon ?", answer: "1821" },
+            { category: "Histoire", difficulty: "Moyen", question: "Qui a succédé à Louis 14 ?", answer: "Louis 15" },
+            { category: "Histoire", difficulty: "Facile", question: "Quelle civilisation a construit les pyramides ?", answer: "Les Égyptiens" },
+            { category: "Histoire", difficulty: "Difficile", question: "Qui était le roi d'Angleterre aux 6 femmes ?", answer: "Henri 8" },
+            { category: "Histoire", difficulty: "Expert", question: "Quel roi a révoqué l'Édit de Nantes ?", answer: "Louis 14" },
+            { category: "Histoire", difficulty: "Moyen", question: "En quelle année a eu lieu la prise de la Bastille ?", answer: "1789" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui a dit 'Veni Vidi Vici' ?", answer: "Jules César" },
+            { category: "Histoire", difficulty: "Difficile", question: "Quel est le prénom de Molière ?", answer: "Jean-Baptiste" },
+            { category: "Histoire", difficulty: "Expert", question: "Combien de temps a duré la guerre de 100 ans ?", answer: "116 ans" },
+            { category: "Histoire", difficulty: "Moyen", question: "Qui a découvert la pénicilline ?", answer: "Fleming" },
+            { category: "Histoire", difficulty: "Expert", question: "Qui était le dernier Tsar de Russie ?", answer: "Nicolas 2" },
+            { category: "Histoire", difficulty: "Expert", question: "Qui a écrit le Code Civil ?", answer: "Napoléon 1er" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui a découvert la gravité avec une pomme ?", answer: "Newton" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quelle est la date de l'armistice de 1918 ?", answer: "11 novembre" },
+            { category: "Histoire", difficulty: "Difficile", question: "Qui a été le premier président des USA ?", answer: "George Washington" },
+            { category: "Histoire", difficulty: "Expert", question: "Qui a assassiné Henri 4 ?", answer: "Ravaillac" },
+            { category: "Histoire", difficulty: "Moyen", question: "Quel pays a attaqué Pearl Harbor ?", answer: "Le Japon" },
+            { category: "Histoire", difficulty: "Facile", question: "Qui était Jeanne d'Arc ?", answer: "Une héroïne française" },
+            { category: "Histoire", difficulty: "Difficile", question: "En quelle année l'homme a marché sur la lune ?", answer: "1969" },
+
+            // --- GÉOGRAPHIE ---
+            { category: "Géographie", difficulty: "Moyen", question: "Quelle est la capitale de l'Australie ?", answer: "Canberra" },
+            { category: "Géographie", difficulty: "Facile", question: "Quel est le plus grand pays du monde ?", answer: "La Russie" },
+            { category: "Géographie", difficulty: "Moyen", question: "Dans quel pays se trouve le Taj Mahal ?", answer: "L'Inde" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quelle est la capitale du Canada ?", answer: "Ottawa" },
+            { category: "Géographie", difficulty: "Facile", question: "Quel continent est le plus froid ?", answer: "L'Antarctique" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quelle chaîne de montagnes sépare la France et l'Espagne ?", answer: "Les Pyrénées" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quelle est la capitale de la Turquie ?", answer: "Ankara" },
+            { category: "Géographie", difficulty: "Expert", question: "Quelle est la capitale du Kazakhstan ?", answer: "Astana" },
+            { category: "Géographie", difficulty: "Expert", question: "Quel pays possède le plus d'îles au monde ?", answer: "La Suède" },
+            { category: "Géographie", difficulty: "Facile", question: "Quelle est la capitale de la France ?", answer: "Paris" },
+            { category: "Géographie", difficulty: "Facile", question: "Quel pays a la forme d'une botte ?", answer: "L'Italie" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quelle est la monnaie du Japon ?", answer: "Le Yen" },
+            { category: "Géographie", difficulty: "Moyen", question: "Sur quel continent se trouve le Brésil ?", answer: "Amérique du Sud" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel est le plus long fleuve du monde ?", answer: "L'Amazone" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quelle est la capitale de la Suisse ?", answer: "Berne" },
+            { category: "Géographie", difficulty: "Expert", question: "Quel est le pays le plus peuplé d'Afrique ?", answer: "Le Nigeria" },
+            { category: "Géographie", difficulty: "Facile", question: "Quelle est la capitale de l'Angleterre ?", answer: "Londres" },
+            { category: "Géographie", difficulty: "Moyen", question: "Où se trouve la Tour de Pise ?", answer: "En Italie" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quel océan borde la Californie ?", answer: "Pacifique" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel détroit sépare l'Espagne du Maroc ?", answer: "Gibraltar" },
+            { category: "Géographie", difficulty: "Expert", question: "Quelle est la capitale de la Nouvelle-Zélande ?", answer: "Wellington" },
+            { category: "Géographie", difficulty: "Facile", question: "Quel est le plus grand désert chaud ?", answer: "Sahara" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quelle est la capitale de l'Allemagne ?", answer: "Berlin" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel pays a pour capitale Hanoï ?", answer: "Vietnam" },
+            { category: "Géographie", difficulty: "Expert", question: "Quel est le plus petit pays du monde ?", answer: "Le Vatican" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quelle est la capitale de la Belgique ?", answer: "Bruxelles" },
+            { category: "Géographie", difficulty: "Facile", question: "Dans quel pays se trouve New York ?", answer: "USA" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quelle est la capitale du Maroc ?", answer: "Rabat" },
+            { category: "Géographie", difficulty: "Expert", question: "Quelle est la capitale de la Bolivie ?", answer: "La Paz (et Sucre)" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quel fleuve traverse l'Égypte ?", answer: "Le Nil" },
+            { category: "Géographie", difficulty: "Facile", question: "Quelle est la monnaie de l'Europe ?", answer: "L'Euro" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel est le plus haut sommet d'Europe ?", answer: "Le Mont Blanc" },
+            { category: "Géographie", difficulty: "Expert", question: "Quel pays a pour capitale Oulan-Bator ?", answer: "La Mongolie" },
+            { category: "Géographie", difficulty: "Moyen", question: "Où se trouve le Machu Picchu ?", answer: "Au Pérou" },
+            { category: "Géographie", difficulty: "Facile", question: "Quelle est la capitale de l'Espagne ?", answer: "Madrid" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel pays est surnommé le pays des cèdres ?", answer: "Le Liban" },
+            { category: "Géographie", difficulty: "Expert", question: "Quelle est la capitale de l'Islande ?", answer: "Reykjavik" },
+            { category: "Géographie", difficulty: "Moyen", question: "Quel pays a pour capitale Pékin ?", answer: "La Chine" },
+            { category: "Géographie", difficulty: "Facile", question: "Sur quel continent est le Kenya ?", answer: "Afrique" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quel est le plus grand lac d'Afrique ?", answer: "Lac Victoria" },
+            { category: "Géographie", difficulty: "Expert", question: "Quelle est la capitale du Venezuela ?", answer: "Caracas" },
+            { category: "Géographie", difficulty: "Moyen", question: "Dans quel pays se trouve la Bavière ?", answer: "Allemagne" },
+            { category: "Géographie", difficulty: "Facile", question: "Quelle mer borde le sud de la France ?", answer: "Méditerranée" },
+            { category: "Géographie", difficulty: "Difficile", question: "Quelle est la capitale de la Colombie ?", answer: "Bogota" },
+            { category: "Géographie", difficulty: "Expert", question: "Quel pays a pour capitale Manille ?", answer: "Les Philippines" },
+
+             // --- SPORT ---
+            { category: "Sport", difficulty: "Facile", question: "Quel pays a gagné la coupe du monde de foot 1998 ?", answer: "La France" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport pratique Rafael Nadal ?", answer: "Le Tennis" },
+            { category: "Sport", difficulty: "Moyen", question: "Combien de joueurs dans une équipe de basket ?", answer: "5" },
+            { category: "Sport", difficulty: "Difficile", question: "Dans quel sport utilise-t-on une crosse et un palet ?", answer: "Hockey sur glace" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel est le sport de Teddy Riner ?", answer: "Le Judo" },
+            { category: "Sport", difficulty: "Expert", question: "Quelle est la distance d'un marathon ?", answer: "42,195 km" },
+            { category: "Sport", difficulty: "Expert", question: "Qui a remporté le Tour de France en 1985 ?", answer: "Bernard Hinault" },
+            { category: "Sport", difficulty: "Facile", question: "Quel est le club de foot de Paris ?", answer: "PSG" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport se joue avec un ballon ovale ?", answer: "Rugby" },
+            { category: "Sport", difficulty: "Moyen", question: "Combien de temps dure un match de foot ?", answer: "90 minutes" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel nageur a le plus de médailles olympiques ?", answer: "Michael Phelps" },
+            { category: "Sport", difficulty: "Difficile", question: "Dans quel sport utilise-t-on un fleuret ?", answer: "Escrime" },
+            { category: "Sport", difficulty: "Difficile", question: "Combien de quilles au bowling ?", answer: "10" },
+            { category: "Sport", difficulty: "Expert", question: "Quel est le record du 100m homme ?", answer: "9.58s" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport pratique Tony Parker ?", answer: "Basketball" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel pays a gagné la coupe du monde 2018 ?", answer: "La France" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel est le surnom de l'équipe de Nouvelle-Zélande ?", answer: "All Blacks" },
+            { category: "Sport", difficulty: "Difficile", question: "Où ont eu lieu les JO de 2008 ?", answer: "Pékin" },
+            { category: "Sport", difficulty: "Expert", question: "Combien de titres de F1 a Lewis Hamilton ?", answer: "7" },
+            { category: "Sport", difficulty: "Facile", question: "Quel objet s'échange-t-on au ping-pong ?", answer: "Une balle" },
+            { category: "Sport", difficulty: "Moyen", question: "Sur quelle surface se joue Wimbledon ?", answer: "Gazon" },
+            { category: "Sport", difficulty: "Difficile", question: "Quel est le sport national du Japon (lutte) ?", answer: "Sumo" },
+            { category: "Sport", difficulty: "Expert", question: "Qui a gagné Roland Garros en 1983 ?", answer: "Yannick Noah" },
+            { category: "Sport", difficulty: "Facile", question: "Quel est le maillot du leader du Tour de France ?", answer: "Jaune" },
+            { category: "Sport", difficulty: "Moyen", question: "Combien de joueurs dans une équipe de volley ?", answer: "6" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel sport pratique Tiger Woods ?", answer: "Golf" },
+            { category: "Sport", difficulty: "Facile", question: "Quel pays a gagné la coupe du monde de rugby 2023 ?", answer: "Afrique du Sud" },
+            { category: "Sport", difficulty: "Difficile", question: "Combien de périodes dans un match de hockey ?", answer: "3" },
+            { category: "Sport", difficulty: "Expert", question: "Qui détient le record de saut à la perche (2024) ?", answer: "Duplantis" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport se joue sur un tatami ?", answer: "Judo" },
+            { category: "Sport", difficulty: "Moyen", question: "Combien de trous sur un parcours de golf ?", answer: "18" },
+            { category: "Sport", difficulty: "Difficile", question: "Quel est le surnom de l'équipe de foot du Brésil ?", answer: "Seleção" },
+            { category: "Sport", difficulty: "Expert", question: "En quelle année Zidane a mis son coup de boule ?", answer: "2006" },
+            { category: "Sport", difficulty: "Moyen", question: "Quelle ville organise les JO 2024 ?", answer: "Paris" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport pratique LeBron James ?", answer: "Basketball" },
+            { category: "Sport", difficulty: "Difficile", question: "Combien de points vaut un essai transformé au rugby ?", answer: "7" },
+            { category: "Sport", difficulty: "Expert", question: "Qui a gagné le Tour de France 2023 ?", answer: "Vingegaard" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel est le sport de Sébastien Loeb ?", answer: "Rallye" },
+            { category: "Sport", difficulty: "Facile", question: "Avec quoi frappe-t-on la balle au baseball ?", answer: "Une batte" },
+            { category: "Sport", difficulty: "Difficile", question: "Combien de joueurs au handball sur le terrain ?", answer: "7" },
+            { category: "Sport", difficulty: "Expert", question: "Quel pays a gagné la première coupe du monde de foot ?", answer: "Uruguay" },
+            { category: "Sport", difficulty: "Moyen", question: "Quel est le surnom de Michael Jordan ?", answer: "Air Jordan" },
+            { category: "Sport", difficulty: "Facile", question: "Quel sport se joue dans un ring ?", answer: "Boxe" },
+            { category: "Sport", difficulty: "Difficile", question: "Quelle est la distance d'un sprint court ?", answer: "100m" },
+            { category: "Sport", difficulty: "Expert", question: "Combien de fois le Brésil a gagné la coupe du monde ?", answer: "5" },
+
+            // --- CINÉMA & SÉRIES ---
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Qui a réalisé Titanic ?", answer: "James Cameron" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Dans quel film entend-on 'Je suis ton père' ?", answer: "Star Wars" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le nom du lion dans Le Roi Lion ?", answer: "Simba" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le nom de l'extra-terrestre de Spielberg ?", answer: "E.T." },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le nom du poisson clown perdu ?", answer: "Nemo" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quelle série met en scène une famille jaune ?", answer: "Les Simpson" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Qui joue Jack Sparrow ?", answer: "Johnny Depp" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Dans quelle ville se passe Batman ?", answer: "Gotham City" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel acteur joue Wolverine ?", answer: "Hugh Jackman" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Dans Matrix, qui joue Neo ?", answer: "Keanu Reeves" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel film se passe dans un parc de dinosaures ?", answer: "Jurassic Park" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Qui a réalisé Pulp Fiction ?", answer: "Quentin Tarantino" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Quel est le nom de l'ordinateur dans 2001 l'Odyssée de l'espace ?", answer: "HAL 9000" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Quel est le premier film parlant de l'histoire ?", answer: "Le Chanteur de Jazz" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Qui a réalisé le film 'Les Oiseaux' ?", answer: "Alfred Hitchcock" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le prénom de l'ogre vert ?", answer: "Shrek" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Qui est le méchant dans Harry Potter ?", answer: "Voldemort" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel est le métier de Walter White ?", answer: "Professeur de chimie" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel super-héros est un homme-araignée ?", answer: "Spider-Man" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Dans quelle ville se déroule Friends ?", answer: "New York" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Qui joue Iron Man ?", answer: "Robert Downey Jr." },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Quel film a gagné 11 Oscars (comme Titanic) ?", answer: "Ben-Hur" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Quel est le nom du traîneau dans Citizen Kane ?", answer: "Rosebud" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Qui est le père de Luke Skywalker ?", answer: "Dark Vador" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel est le nom du poisson clown perdu ?", answer: "Nemo" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel agent secret a le matricule 007 ?", answer: "James Bond" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Qui a réalisé Inception ?", answer: "Christopher Nolan" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "En quelle année est sorti le premier Star Wars ?", answer: "1977" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le nom du jouet cow-boy dans Toy Story ?", answer: "Woody" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quelle famille habite à Springfield ?", answer: "Les Simpson" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Quel acteur joue Forrest Gump ?", answer: "Tom Hanks" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Qui a réalisé 'Le Parrain' ?", answer: "Coppola" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Quel est le nom du chien de Mickey ?", answer: "Pluto" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel super-héros est vert et fort ?", answer: "Hulk" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Dans quel film voit-on la planète Pandora ?", answer: "Avatar" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Quel est le vrai nom de Marilyn Monroe ?", answer: "Norma Jeane Baker" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Qui est la Reine des Neiges ?", answer: "Elsa" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Qui est l'ami de Shrek ?", answer: "L'Âne" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Quel film a pour réplique 'I'll be back' ?", answer: "Terminator" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Qui joue le Joker dans 'The Dark Knight' ?", answer: "Heath Ledger" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Qui est le frère de Thor ?", answer: "Loki" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel est le nom de la fée dans Peter Pan ?", answer: "Clochette" },
+            { category: "Cinéma & Séries", difficulty: "Difficile", question: "Dans quelle ville se passe 'Stranger Things' ?", answer: "Hawkins" },
+            { category: "Cinéma & Séries", difficulty: "Expert", question: "Qui a réalisé 'La La Land' ?", answer: "Damien Chazelle" },
+            { category: "Cinéma & Séries", difficulty: "Moyen", question: "Qui est le capitaine du Black Pearl ?", answer: "Jack Sparrow" },
+            { category: "Cinéma & Séries", difficulty: "Facile", question: "Quel animal est Bambi ?", answer: "Un faon" },
+
+            // --- MUSIQUE ---
+            { category: "Musique", difficulty: "Facile", question: "Qui chante 'All I Want for Christmas Is You' ?", answer: "Mariah Carey" },
+            { category: "Musique", difficulty: "Facile", question: "Qui est la Reine de la Pop ?", answer: "Madonna" },
+            { category: "Musique", difficulty: "Facile", question: "Quel DJ porte un casque de guimauve ?", answer: "Marshmello" },
+            { category: "Musique", difficulty: "Facile", question: "Qui chante 'Baby One More Time' ?", answer: "Britney Spears" },
+            { category: "Musique", difficulty: "Facile", question: "Quel groupe a chanté 'We Will Rock You' ?", answer: "Queen" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel groupe a chanté 'Bohemian Rhapsody' ?", answer: "Queen" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel instrument a des cordes et un archet ?", answer: "Le violon" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui a chanté 'La Bohème' ?", answer: "Charles Aznavour" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui est le rappeur de 'Gangsta's Paradise' ?", answer: "Coolio" },
+            { category: "Musique", difficulty: "Moyen", question: "De quelle ville viennent les Beatles ?", answer: "Liverpool" },
+            { category: "Musique", difficulty: "Difficile", question: "Quel groupe français chante 'L'Aventurier' ?", answer: "Indochine" },
+            { category: "Musique", difficulty: "Difficile", question: "Quel groupe de rock a un éclair sur le visage ?", answer: "David Bowie" },
+            { category: "Musique", difficulty: "Difficile", question: "Combien de touches a un piano standard ?", answer: "88" },
+            { category: "Musique", difficulty: "Expert", question: "Quel est l'opus de la 9ème symphonie de Beethoven ?", answer: "Opus 125" },
+            { category: "Musique", difficulty: "Expert", question: "En quelle année est mort Kurt Cobain ?", answer: "1994" },
+            { category: "Musique", difficulty: "Facile", question: "Quel instrument a 6 cordes ?", answer: "Guitare" },
+            { category: "Musique", difficulty: "Facile", question: "Qui chante 'Thriller' ?", answer: "Michael Jackson" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel est le prénom de Mozart ?", answer: "Wolfgang" },
+            { category: "Musique", difficulty: "Difficile", question: "Quel est le vrai nom de Lady Gaga ?", answer: "Stefani Germanotta" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel rappeur a épousé Beyoncé ?", answer: "Jay-Z" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui a chanté 'La Vie en Rose' ?", answer: "Édith Piaf" },
+            { category: "Musique", difficulty: "Expert", question: "Qui a composé 'Les Quatre Saisons' ?", answer: "Vivaldi" },
+            { category: "Musique", difficulty: "Facile", question: "Quel DJ porte un casque blanc ?", answer: "Marshmello" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel est le prénom de Johnny Hallyday ?", answer: "Jean-Philippe" },
+            { category: "Musique", difficulty: "Difficile", question: "Quel groupe a chanté 'Highway to Hell' ?", answer: "AC/DC" },
+            { category: "Musique", difficulty: "Expert", question: "Quel est le nom du dernier album des Beatles ?", answer: "Let It Be" },
+            { category: "Musique", difficulty: "Facile", question: "Qui chante 'Happy' ?", answer: "Pharrell Williams" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel instrument joue Elton John ?", answer: "Piano" },
+            { category: "Musique", difficulty: "Difficile", question: "Qui est le chanteur de U2 ?", answer: "Bono" },
+            { category: "Musique", difficulty: "Expert", question: "Quel est le vrai nom de Sting ?", answer: "Gordon Sumner" },
+            { category: "Musique", difficulty: "Facile", question: "Quel groupe chante 'We Will Rock You' ?", answer: "Queen" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui chante 'Rolling in the Deep' ?", answer: "Adele" },
+            { category: "Musique", difficulty: "Difficile", question: "Qui a gagné l'Eurovision en 1974 ?", answer: "ABBA" },
+            { category: "Musique", difficulty: "Expert", question: "Quel est le vrai nom de Eminem ?", answer: "Marshall Mathers" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui est le roi du Reggae ?", answer: "Bob Marley" },
+            { category: "Musique", difficulty: "Facile", question: "Qui chante 'Djadja' ?", answer: "Aya Nakamura" },
+            { category: "Musique", difficulty: "Difficile", question: "Quel groupe porte des casques de robots ?", answer: "Daft Punk" },
+            { category: "Musique", difficulty: "Expert", question: "En quelle année est mort Elvis Presley ?", answer: "1977" },
+            { category: "Musique", difficulty: "Moyen", question: "Quel est l'instrument de Louis Armstrong ?", answer: "Trompette" },
+            { category: "Musique", difficulty: "Facile", question: "Combien de membres dans les Beatles ?", answer: "4" },
+            { category: "Musique", difficulty: "Difficile", question: "Qui a écrit 'La Marseillaise' ?", answer: "Rouget de Lisle" },
+            { category: "Musique", difficulty: "Expert", question: "Quel est le premier album de Michael Jackson ?", answer: "Got to Be There" },
+            { category: "Musique", difficulty: "Moyen", question: "Qui chante 'Papaoutai' ?", answer: "Stromae" },
+            { category: "Musique", difficulty: "Facile", question: "Quel instrument a des touches noires et blanches ?", answer: "Piano" },
+            { category: "Musique", difficulty: "Difficile", question: "Qui est le batteur des Beatles ?", answer: "Ringo Starr" },
+
+             // --- JEUX VIDÉO ---
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quel est le prénom de Mario ?", answer: "Mario" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Dans quel jeu construit-on avec des blocs cubiques ?", answer: "Minecraft" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Dans quel jeu tire-t-on sur des oiseaux avec une fronde ?", answer: "Angry Birds" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Dans quel jeu y a-t-il des imposteurs ?", answer: "Among Us" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Dans quel jeu explore-t-on Hyrule ?", answer: "Zelda" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quelle est la couleur de Pac-Man ?", answer: "Jaune" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Dans quel jeu attrape-t-on des monstres ?", answer: "Pokémon" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quel hérisson est bleu et rapide ?", answer: "Sonic" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quelle console a été créée par Sony ?", answer: "PlayStation" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quel est le frère de Mario ?", answer: "Luigi" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quel jeu de foot est le concurrent de PES ?", answer: "FIFA (ou EA FC)" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quelle est la couleur de la casquette de Luigi ?", answer: "Verte" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Qui est l'ennemi de Sonic ?", answer: "Dr. Robotnik (Eggman)" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel héros est un bandicoot ?", answer: "Crash Bandicoot" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel est le jeu de cartes de l'univers Warcraft ?", answer: "Hearthstone" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "En quelle année est sortie la première PlayStation au Japon ?", answer: "1994" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Comment s'appelle le créateur de Mario ?", answer: "Shigeru Miyamoto" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quel jeu consiste à empiler des briques ?", answer: "Tetris" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quel est le nom de la princesse dans Mario ?", answer: "Peach" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Dans quel jeu incarne-t-on Kratos ?", answer: "God of War" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "En quelle année est sorti World of Warcraft ?", answer: "2004" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quelle console a suivi la PS3 ?", answer: "PS4" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel est le nom du dragon violet ?", answer: "Spyro" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Qui a créé Mario ?", answer: "Shigeru Miyamoto" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quel est l'animal Sonic ?", answer: "Hérisson" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quel gorille lance des tonneaux ?", answer: "Donkey Kong" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel est le nom du soldat vert dans Halo ?", answer: "Master Chief" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Quel est le jeu le plus vendu de tous les temps ?", answer: "Minecraft" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Qui est l'héroïne de Tomb Raider ?", answer: "Lara Croft" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel studio a créé GTA ?", answer: "Rockstar Games" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Quel est le nom du héros de Final Fantasy 7 ?", answer: "Cloud Strife" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Dans quel jeu gère-t-on une ville ?", answer: "SimCity" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quelle console a une manette blanche et une télécommande ?", answer: "Wii" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Qui est le frère de Solid Snake ?", answer: "Liquid Snake" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Quel est le premier jeu vidéo commercial ?", answer: "Pong" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Quel jeu de voiture a des carapaces bleues ?", answer: "Mario Kart" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel est le nom de l'assassin dans Assassin's Creed 1 ?", answer: "Altaïr" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Combien de Pokémon y avait-il dans la 1ère génération ?", answer: "151" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Dans quel jeu combat-on dans une arène ?", answer: "Super Smash Bros" },
+            { category: "Jeux Vidéo", difficulty: "Facile", question: "Quelle est la couleur de la casquette de Mario ?", answer: "Rouge" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel est le nom de la ville dans Resident Evil ?", answer: "Raccoon City" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "En quelle année est sorti la Nintendo 64 ?", answer: "1996" },
+            { category: "Jeux Vidéo", difficulty: "Moyen", question: "Qui est le méchant dans Zelda ?", answer: "Ganon" },
+            { category: "Jeux Vidéo", difficulty: "Difficile", question: "Quel jeu se passe à Rapture ?", answer: "BioShock" },
+            { category: "Jeux Vidéo", difficulty: "Expert", question: "Quel est le code de triche le plus célèbre ?", answer: "Konami Code" },
+
+            // --- SCIENCES ---
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel est le symbole chimique de l'eau ?", answer: "H2O" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel gaz est nécessaire pour respirer ?", answer: "Oxygène" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "À combien de degrés l'eau gèle-t-elle ?", answer: "0" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel organe permet de penser ?", answer: "Le cerveau" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quelle planète est la plus proche du soleil ?", answer: "Mercure" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quel est le plus grand mammifère ?", answer: "La baleine bleue" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quelle planète a des anneaux ?", answer: "Saturne" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Combien d'os dans le corps humain (adulte) ?", answer: "206" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quel est l'animal le plus rapide du monde (oiseau) ?", answer: "Le faucon pèlerin" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quel est le nom de la théorie de Darwin ?", answer: "L'évolution" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quel est l'élément chimique le plus léger ?", answer: "L'Hydrogène" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Combien de pattes a une araignée ?", answer: "8" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel gaz respire-t-on ?", answer: "Oxygène" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Qui a inventé l'ampoule ?", answer: "Edison" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Combien de dents a un adulte ?", answer: "32" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quelle est la vitesse de la lumière ?", answer: "300 000 km/s" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Combien de chromosomes a l'humain ?", answer: "46" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "A combien de degrés bout l'eau ?", answer: "100" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quel organe pompe le sang ?", answer: "Coeur" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quel est le gaz le plus abondant dans l'air ?", answer: "Azote" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Qui a formulé la relativité ?", answer: "Einstein" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel animal a un long cou ?", answer: "Girafe" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quelle force nous attire au sol ?", answer: "Gravité" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quel est l'organe le plus grand ?", answer: "Peau" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Nom de la première brebis clonée ?", answer: "Dolly" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Combien de planètes dans le système solaire ?", answer: "8" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quel est le symbole chimique de l'Or ?", answer: "Au" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Qui a découvert la pénicilline ?", answer: "Fleming" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quelle est la distance Terre-Soleil ?", answer: "150 millions km" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "De quelle couleur est le sang ?", answer: "Rouge" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quel est l'animal terrestre le plus rapide ?", answer: "Guépard" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Combien de coeurs a une pieuvre ?", answer: "3" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quel est l'os le plus long du corps ?", answer: "Fémur" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel astre nous éclaire le jour ?", answer: "Soleil" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quelle planète est rouge ?", answer: "Mars" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Qui a découvert le radium ?", answer: "Marie Curie" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quelle particule a une charge négative ?", answer: "Electron" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Quel arbre produit des glands ?", answer: "Chêne" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel liquide sort d'un volcan ?", answer: "Lave" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quelle est l'unité de mesure du son ?", answer: "Décibel" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Quel est le pH de l'eau pure ?", answer: "7" },
+            { category: "Sciences & Nature", difficulty: "Moyen", question: "Combien de pattes a une mouche ?", answer: "6" },
+            { category: "Sciences & Nature", difficulty: "Facile", question: "Quel oiseau ne vole pas et vit sur la glace ?", answer: "Manchot" },
+            { category: "Sciences & Nature", difficulty: "Difficile", question: "Quel est le plus grand océan ?", answer: "Pacifique" },
+            { category: "Sciences & Nature", difficulty: "Expert", question: "Qui a inventé la dynamite ?", answer: "Alfred Nobel" },
+
+            // --- LITTÉRATURE ---
+            { category: "Littérature & BD", difficulty: "Facile", question: "Qui a écrit Harry Potter ?", answer: "J.K. Rowling" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel héros de BD est reporter ?", answer: "Tintin" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel est le nom du chien d'Obélix ?", answer: "Idéfix" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui a écrit Les Misérables ?", answer: "Victor Hugo" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui a écrit Les Trois Mousquetaires ?", answer: "Alexandre Dumas" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Quel poète a écrit 'Les Fleurs du Mal' ?", answer: "Baudelaire" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Quel est le vrai nom de Molière ?", answer: "Jean-Baptiste Poquelin" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Qui a écrit 'À la recherche du temps perdu' ?", answer: "Marcel Proust" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Quel est le livre le plus vendu au monde (hors Bible) ?", answer: "Don Quichotte" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Qui est l'amoureux de Juliette ?", answer: "Roméo" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel cowboy tire plus vite que son ombre ?", answer: "Lucky Luke" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui a écrit les Fables ?", answer: "La Fontaine" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui est le créateur de Tintin ?", answer: "Hergé" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'L'Avare' ?", answer: "Molière" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Quel auteur a refusé le prix Nobel ?", answer: "Sartre" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel personnage a un long nez quand il ment ?", answer: "Pinocchio" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui est l'ami de Sherlock Holmes ?", answer: "Watson" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui a écrit 'Vingt mille lieues sous les mers' ?", answer: "Jules Verne" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit '1984' ?", answer: "Orwell" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel gaulois est tombé dans la marmite ?", answer: "Obélix" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Quel est le nom du capitaine dans Tintin ?", answer: "Haddock" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'Madame Bovary' ?", answer: "Flaubert" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Qui a écrit 'La Divine Comédie' ?", answer: "Dante" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel petit garçon ne veut pas grandir ?", answer: "Peter Pan" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui a écrit Le Petit Prince ?", answer: "Saint-Exupéry" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui est l'auteur de 'Germinal' ?", answer: "Zola" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Quel est le prénom de Rimbaud ?", answer: "Arthur" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel héros porte une cape rouge et un S ?", answer: "Superman" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui est le valet de Don Quichotte ?", answer: "Sancho Panza" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'Orgueil et Préjugés' ?", answer: "Jane Austen" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Qui a écrit 'Ulysse' ?", answer: "James Joyce" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui est le créateur d'Astérix ?", answer: "Goscinny et Uderzo" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel animal est le Chat Botté ?", answer: "Un chat" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'Le Rouge et le Noir' ?", answer: "Stendhal" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Quel poète a écrit 'Alcools' ?", answer: "Apollinaire" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Quel détective belge a été créé par Agatha Christie ?", answer: "Hercule Poirot" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Qui veut tuer Blanche-Neige ?", answer: "La Reine" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'L'Étranger' ?", answer: "Camus" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Dans quelle ville se passe 'Ulysse' de Joyce ?", answer: "Dublin" },
+            { category: "Littérature & BD", difficulty: "Moyen", question: "Qui est le fiancé de la Castafiore (rumeur) ?", answer: "Haddock" },
+            { category: "Littérature & BD", difficulty: "Facile", question: "Quel super-héros est riche et s'habille en chauve-souris ?", answer: "Batman" },
+            { category: "Littérature & BD", difficulty: "Difficile", question: "Qui a écrit 'Les Hauts de Hurlevent' ?", answer: "Emily Brontë" },
+            { category: "Littérature & BD", difficulty: "Expert", question: "Qui a écrit 'Voyage au bout de la nuit' ?", answer: "Céline" },
+        ];
+
+        // --- ICONS (SVG) ---
+        // (Les mêmes icônes que précédemment)
         const Icons = {
             Trophy: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>,
             Settings: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
@@ -150,407 +640,19 @@
             Zap: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
             Volume2: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
             VolumeX: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>,
-            Eye: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>,
-            EyeOff: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
             Joker: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 13s1.5 2 3 2 3-2 3-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><path d="M12 2a5 5 0 0 1 5 5v2h-2V7a3 3 0 0 0-6 0v2H7V7a5 5 0 0 1 5-5z"/></svg>,
+            Skull: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2c-3.3 0-6 2.7-6 6v3c0 2.3 2.1 4.3 4.2 5.5l.3.2a10 10 0 0 0 3 0l.3-.2C15.9 15.3 18 13.3 18 11V8c0-3.3-2.7-6-6-6Z"/><path d="M10 18h4"/><path d="M9 22h6"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/></svg>,
+            Upload: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+            Image: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
+            Save: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+            Music: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
+            Undo: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>,
+            Download: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+            FileUp: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg>
         };
 
-        const CATEGORIES = {
-            ALL: "TOUT MÉLANGER",
-            ANIME: "Animés & Mangas",
-            HISTOIRE: "Histoire",
-            GEO: "Géographie",
-            SPORT: "Sport",
-            CINEMA: "Cinéma & Séries",
-            MUSIQUE: "Musique",
-            JEUX: "Jeux Vidéo",
-            SCIENCES: "Sciences & Nature",
-            LITTERATURE: "Littérature & BD"
-        };
-
-        const SOUNDS = {
-            CORRECT: { freq: 880, type: 'sine', duration: 0.1 },
-            WRONG: { freq: 150, type: 'sawtooth', duration: 0.3 },
-            JOKER: { freq: 600, type: 'triangle', duration: 0.4 },
-            END: { freq: 100, type: 'triangle', duration: 1 }
-        };
-
-        // --- BASE DE DONNEES MASSIVE (ÉCHANTILLON LARGE) ---
-        const ALL_QUESTIONS = [
-            // --- ANIMÉS & MANGAS ---
-            // Facile (35%)
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le nom du héros de One Piece ?", answer: "Luffy" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le prénom de Goku ?", answer: "Son Goku" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel Pokémon est jaune et lance des éclairs ?", answer: "Pikachu" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Dans Naruto, quel est le nom du village caché des feuilles ?", answer: "Konoha" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le rêve de Naruto ?", answer: "Devenir Hokage" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Comment s'appelle le chat bleu volant dans Fairy Tail ?", answer: "Happy" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le trésor que cherche Luffy ?", answer: "Le One Piece" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Dans Pokémon, qui est le maître de Pikachu ?", answer: "Sacha" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel ninja porte un bandeau frontal avec une feuille ?", answer: "Naruto" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le nom de la boule de cristal à 4 étoiles ?", answer: "Suuishinchu" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Comment s'appelle le sensei de Naruto ?", answer: "Kakashi" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quelle est la couleur des cheveux de Sakura Haruno ?", answer: "Rose" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel est le nom du rival de Goku ?", answer: "Vegeta" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Dans quel anime trouve-t-on L ?", answer: "Death Note" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Quel sport est pratiqué dans Captain Tsubasa ?", answer: "Football" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Qui est le personnage principal de Dragon Ball ?", answer: "Goku" },
-            { category: CATEGORIES.ANIME, difficulty: "Facile", question: "Dans One Piece, quel fruit a mangé Luffy ?", answer: "Gomu Gomu no Mi" },
-            // Moyen (35%)
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Comment s'appelle le cahier de la mort dans Death Note ?", answer: "Le Death Note" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans l'Attaque des Titans, que mangent les Titans ?", answer: "Des humains" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Quel est le nom du studio de Miyazaki ?", answer: "Studio Ghibli" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Quel sport pratique Olive et Tom ?", answer: "Le Football" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans Demon Slayer, que chasse Tanjiro ?", answer: "Des démons" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans Sailor Moon, quelle planète représente l'héroïne ?", answer: "La Lune" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans My Hero Academia, comment appelle-t-on les super-pouvoirs ?", answer: "Les Alters" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Qui est le rival de Yugi dans Yu-Gi-Oh ?", answer: "Kaiba" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Quel est le nom du vaisseau de Cobra ?", answer: "Le Psychoroïde" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans Dragon Ball Z, qui est le père de Son Gohan ?", answer: "Goku" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Quel est le nom de l'épée de Trunks ?", answer: "Tapion's Sword" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Dans Naruto, qui est le frère de Sasuke ?", answer: "Itachi" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Quel est le nom du Titan d'Eren ?", answer: "Titan Assaillant" },
-            { category: CATEGORIES.ANIME, difficulty: "Moyen", question: "Qui est le capitaine de la 7ème division dans Bleach ?", answer: "Komamura" },
-            // Difficile (20%)
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Quel pirate de l'espace a une cicatrice au visage ?", answer: "Albator" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Qui est le frère d'Edward Elric ?", answer: "Alphonse" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Quel est le nom du robot géant piloté par Actarus ?", answer: "Goldorak" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Qui a écrit Dragon Ball ?", answer: "Akira Toriyama" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Quel est le nom de l'épée d'Ichigo dans Bleach ?", answer: "Zangetsu" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Dans Hunter x Hunter, quel est le type de Nen de Gon ?", answer: "Renforcement" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Quel est le nom du père de Luffy ?", answer: "Dragon" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Quel est le nom du shinigami qui accompagne Light ?", answer: "Ryuk" },
-            { category: CATEGORIES.ANIME, difficulty: "Difficile", question: "Dans Evangelion, quel est le nom de l'organisation ?", answer: "NERV" },
-            // Expert (10%)
-            { category: CATEGORIES.ANIME, difficulty: "Expert", question: "Quel est le vrai nom de L dans Death Note ?", answer: "L Lawliet" },
-            { category: CATEGORIES.ANIME, difficulty: "Expert", question: "Dans One Piece, quel est le nom de l'épée maudite de Zoro ?", answer: "Sandai Kitetsu" },
-            { category: CATEGORIES.ANIME, difficulty: "Expert", question: "Quel est le numéro de l'Eva pilotée par Shinji Ikari ?", answer: "L'Eva-01" },
-            { category: CATEGORIES.ANIME, difficulty: "Expert", question: "Quel est le nom complet de Fullmetal Alchemist ?", answer: "Edward Elric" },
-            { category: CATEGORIES.ANIME, difficulty: "Expert", question: "Dans Berserk, quel est le nom de l'épée de Guts ?", answer: "Dragon Slayer" },
-
-            // --- HISTOIRE ---
-            // Facile
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Qui était le 'Roi Soleil' ?", answer: "Louis XIV" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Qui a découvert l'Amérique en 1492 ?", answer: "Christophe Colomb" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "En quelle année a commencé la Révolution française ?", answer: "1789" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quel pays a offert la Statue de la Liberté aux USA ?", answer: "La France" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quel mur a divisé Berlin ?", answer: "Le Mur de Berlin" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Qui a peint la Joconde ?", answer: "Léonard de Vinci" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quelle guerre s'est terminée en 1945 ?", answer: "La Seconde Guerre Mondiale" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Qui était le premier empereur romain ?", answer: "Auguste (ou César)" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quelle reine d'Égypte a eu une liaison avec César ?", answer: "Cléopâtre" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Qui a dit 'Je pense donc je suis' ?", answer: "Descartes" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quel pays a été dirigé par Fidel Castro ?", answer: "Cuba" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Facile", question: "Quel président américain a été assassiné à Dallas ?", answer: "JFK" },
-            // Moyen
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Quelle année marque la chute du Mur de Berlin ?", answer: "1989" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Quel empereur français est mort à Sainte-Hélène ?", answer: "Napoléon Ier" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Qui était la dernière reine de France ?", answer: "Marie-Antoinette" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Qui a inventé le téléphone ?", answer: "Alexander Graham Bell" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Qui a prononcé l'appel du 18 juin ?", answer: "Charles de Gaulle" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Quel roi a été guillotiné en 1793 ?", answer: "Louis XVI" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Qui a inventé l'imprimerie ?", answer: "Gutenberg" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Quel président américain a aboli l'esclavage ?", answer: "Lincoln" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Quel explorateur a fait le premier tour du monde ?", answer: "Magellan" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Moyen", question: "Qui a écrit le 'Manifeste du Parti communiste' ?", answer: "Marx" },
-            // Difficile
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Qui a construit la Tour Eiffel ?", answer: "Gustave Eiffel" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Quelle guerre a opposé le Nord et le Sud des USA ?", answer: "La guerre de Sécession" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "En quelle année l'armistice de la Guerre 14-18 a-t-il été signé ?", answer: "1918" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Qui était le chef des Huns ?", answer: "Attila" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Combien d'années a duré la guerre de Cent Ans ?", answer: "116 ans" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Quel traité a mis fin à la Première Guerre mondiale ?", answer: "Le Traité de Versailles" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Qui a unifié l'Allemagne en 1871 ?", answer: "Bismarck" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Difficile", question: "Quel roi d'Angleterre a eu six femmes ?", answer: "Henri VIII" },
-            // Expert
-            { category: CATEGORIES.HISTOIRE, difficulty: "Expert", question: "En quelle année Charlemagne a-t-il été sacré empereur ?", answer: "800" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Expert", question: "Qui était le premier roi des Francs ?", answer: "Clovis" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Expert", question: "Quel est le nom de l'assassin de Kennedy ?", answer: "Lee Harvey Oswald" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Expert", question: "Quelle bataille a marqué la fin de Napoléon ?", answer: "Waterloo" },
-            { category: CATEGORIES.HISTOIRE, difficulty: "Expert", question: "Qui était le dernier Tsar de Russie ?", answer: "Nicolas II" },
-
-            // --- GÉOGRAPHIE ---
-            // Facile
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quel est le plus grand pays du monde ?", answer: "La Russie" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quel continent est le plus froid ?", answer: "L'Antarctique" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quelle est la capitale de la Belgique ?", answer: "Bruxelles" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quel est le plus grand océan ?", answer: "Pacifique" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Dans quel pays se trouve la ville de Venise ?", answer: "Italie" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quelle est la monnaie des États-Unis ?", answer: "Le Dollar" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quelle est la capitale de l'Espagne ?", answer: "Madrid" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quel pays a la forme d'une botte ?", answer: "L'Italie" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quelle est la capitale de la France ?", answer: "Paris" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Sur quel continent se trouve l'Égypte ?", answer: "Afrique" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quelle est la capitale du Royaume-Uni ?", answer: "Londres" },
-            { category: CATEGORIES.GEO, difficulty: "Facile", question: "Quel est le pays du Soleil Levant ?", answer: "Japon" },
-            // Moyen
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quelle est la capitale de l'Australie ?", answer: "Canberra" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Dans quel pays se trouve le Taj Mahal ?", answer: "L'Inde" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quelle est la capitale du Canada ?", answer: "Ottawa" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quel pays a pour capitale Pékin ?", answer: "Chine" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quel est le plus long fleuve d'Afrique ?", answer: "Le Nil" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quelle est la capitale du Portugal ?", answer: "Lisbonne" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quelle est la monnaie du Royaume-Uni ?", answer: "La Livre Sterling" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Dans quel pays se trouve la ville de Rio de Janeiro ?", answer: "Brésil" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quelle est la capitale de l'Allemagne ?", answer: "Berlin" },
-            { category: CATEGORIES.GEO, difficulty: "Moyen", question: "Quel est le plus grand désert chaud ?", answer: "Le Sahara" },
-            // Difficile
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quelle chaîne de montagnes sépare la France et l'Espagne ?", answer: "Les Pyrénées" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quelle est la capitale de la Turquie ?", answer: "Ankara" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quel détroit sépare l'Espagne du Maroc ?", answer: "Le détroit de Gibraltar" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quelle est la capitale de la Suisse ?", answer: "Berne" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quel est le plus grand lac du monde ?", answer: "La Mer Caspienne" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quelle est la capitale du Brésil ?", answer: "Brasilia" },
-            { category: CATEGORIES.GEO, difficulty: "Difficile", question: "Quel pays est traversé par l'équateur et a pour capitale Quito ?", answer: "Équateur" },
-            // Expert
-            { category: CATEGORIES.GEO, difficulty: "Expert", question: "Quelle est la capitale du Kazakhstan ?", answer: "Astana" },
-            { category: CATEGORIES.GEO, difficulty: "Expert", question: "Quel pays possède le plus d'îles au monde ?", answer: "La Suède" },
-            { category: CATEGORIES.GEO, difficulty: "Expert", question: "Quelle est la capitale de la Nouvelle-Zélande ?", answer: "Wellington" },
-            { category: CATEGORIES.GEO, difficulty: "Expert", question: "Quel est le pays le plus peuplé d'Afrique ?", answer: "Nigeria" },
-            { category: CATEGORIES.GEO, difficulty: "Expert", question: "Quelle est la capitale du Vietnam ?", answer: "Hanoï" },
-
-             // --- SPORT ---
-            // Facile
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel pays a gagné la coupe du monde de foot 1998 ?", answer: "La France" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel sport pratique Rafael Nadal ?", answer: "Le Tennis" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel est le club de foot de Marseille ?", answer: "L'OM" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel objet s'échange-t-on au ping-pong ?", answer: "Une balle" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Combien de mi-temps y a-t-il au foot ?", answer: "2" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel sport se joue avec un ballon ovale ?", answer: "Le Rugby" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Qui est la star du basket des années 90 (Bulls) ?", answer: "Michael Jordan" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Dans quel sport utilise-t-on une raquette ?", answer: "Tennis" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quelle est la couleur du maillot jaune du Tour de France ?", answer: "Jaune" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel sport pratique Usain Bolt ?", answer: "Athlétisme" },
-            { category: CATEGORIES.SPORT, difficulty: "Facile", question: "Quel est le sport de Tiger Woods ?", answer: "Golf" },
-            // Moyen
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Combien de joueurs dans une équipe de basket ?", answer: "5" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Quel est le sport de Teddy Riner ?", answer: "Le Judo" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Dans quel sport tire-t-on des lancers francs ?", answer: "Basketball" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Combien de joueurs dans une équipe de football ?", answer: "11" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Quel nageur américain a gagné le plus de médailles ?", answer: "Michael Phelps" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Sur quelle surface se joue Roland-Garros ?", answer: "Terre battue" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Quel est le surnom de l'équipe de rugby de Nouvelle-Zélande ?", answer: "All Blacks" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Combien d'anneaux a le drapeau olympique ?", answer: "5" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Quel pays a organisé les JO de 2008 ?", answer: "Chine" },
-            { category: CATEGORIES.SPORT, difficulty: "Moyen", question: "Qui a gagné la Coupe du Monde de foot 2018 ?", answer: "La France" },
-            // Difficile
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Dans quel sport utilise-t-on une crosse et un palet ?", answer: "Hockey sur glace" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Combien de quilles y a-t-il au bowling ?", answer: "10" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Quel sport se joue dans une piscine avec un ballon ?", answer: "Water-polo" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Dans quel sport utilise-t-on un fleuret ?", answer: "L'escrime" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Quelle est la durée d'un match de rugby ?", answer: "80 minutes" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "Quel pays a remporté le plus de Coupes du Monde de football ?", answer: "Brésil" },
-            { category: CATEGORIES.SPORT, difficulty: "Difficile", question: "En quelle année ont eu lieu les premiers JO modernes ?", answer: "1896" },
-            // Expert
-            { category: CATEGORIES.SPORT, difficulty: "Expert", question: "Quelle est la distance d'un marathon ?", answer: "42,195 km" },
-            { category: CATEGORIES.SPORT, difficulty: "Expert", question: "Qui a remporté le Tour de France en 1985 ?", answer: "Bernard Hinault" },
-            { category: CATEGORIES.SPORT, difficulty: "Expert", question: "En quelle année les JO ont-ils eu lieu à Londres récemment ?", answer: "2012" },
-            { category: CATEGORIES.SPORT, difficulty: "Expert", question: "Quel est le record du monde du 100m ?", answer: "9.58s" },
-            { category: CATEGORIES.SPORT, difficulty: "Expert", question: "Combien de fois Michael Schumacher a-t-il été champion du monde ?", answer: "7" },
-
-            // --- CINÉMA ---
-            // Facile
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Qui a réalisé Titanic ?", answer: "James Cameron" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Dans quel film entend-on 'Je suis ton père' ?", answer: "Star Wars" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel est le nom du lion dans Le Roi Lion ?", answer: "Simba" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel est le nom de l'extra-terrestre de Spielberg ?", answer: "E.T." },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel est le nom du poisson clown perdu ?", answer: "Nemo" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quelle série met en scène une famille jaune ?", answer: "Les Simpson" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Qui est la fiancée de Mickey ?", answer: "Minnie" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel est le prénom de Harry Potter ?", answer: "Harry" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel ogre est vert et gentil ?", answer: "Shrek" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel super-héros est vert et très fort ?", answer: "Hulk" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Quel est le métier de James Bond ?", answer: "Espion" },
-            { category: CATEGORIES.CINEMA, difficulty: "Facile", question: "Qui est l'ennemi de Batman ?", answer: "Le Joker" },
-            // Moyen
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Qui joue Jack Sparrow ?", answer: "Johnny Depp" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Dans quelle ville se passe Batman ?", answer: "Gotham City" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Quel acteur joue Wolverine ?", answer: "Hugh Jackman" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Dans Matrix, qui joue Neo ?", answer: "Keanu Reeves" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Quel film se passe dans un parc de dinosaures ?", answer: "Jurassic Park" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Quel agent secret a le matricule 007 ?", answer: "James Bond" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Dans quelle ville se passe Friends ?", answer: "New York" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Quel film a pour héros un archéologue aventurier ?", answer: "Indiana Jones" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Qui a réalisé Avatar ?", answer: "James Cameron" },
-            { category: CATEGORIES.CINEMA, difficulty: "Moyen", question: "Quel est le nom du petit robot dans Star Wars ?", answer: "R2-D2" },
-            // Difficile
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Qui a réalisé Pulp Fiction ?", answer: "Quentin Tarantino" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Quel est le nom de l'ordinateur dans 2001 l'Odyssée de l'espace ?", answer: "HAL 9000" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Dans quel film trouve-t-on la réplique 'On ne laisse pas Bébé dans un coin' ?", answer: "Dirty Dancing" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Qui joue le rôle principal dans Forrest Gump ?", answer: "Tom Hanks" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Quel film a gagné le plus d'Oscars (ex aequo avec Titanic) ?", answer: "Ben-Hur (ou Le Seigneur des Anneaux 3)" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Qui a réalisé Inception ?", answer: "Christopher Nolan" },
-            { category: CATEGORIES.CINEMA, difficulty: "Difficile", question: "Quel est le nom de la planète dans Avatar ?", answer: "Pandora" },
-            // Expert
-            { category: CATEGORIES.CINEMA, difficulty: "Expert", question: "Quel est le premier film parlant de l'histoire ?", answer: "Le Chanteur de Jazz" },
-            { category: CATEGORIES.CINEMA, difficulty: "Expert", question: "Qui a réalisé le film 'Les Oiseaux' ?", answer: "Alfred Hitchcock" },
-            { category: CATEGORIES.CINEMA, difficulty: "Expert", question: "Quel est le nom du traîneau dans Citizen Kane ?", answer: "Rosebud" },
-            { category: CATEGORIES.CINEMA, difficulty: "Expert", question: "En quelle année est sorti le premier Star Wars ?", answer: "1977" },
-            { category: CATEGORIES.CINEMA, difficulty: "Expert", question: "Qui a composé la musique de Star Wars ?", answer: "John Williams" },
-
-            // --- MUSIQUE ---
-            // Facile
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui chante 'All I Want for Christmas Is You' ?", answer: "Mariah Carey" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui est la Reine de la Pop ?", answer: "Madonna" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel DJ porte un casque de guimauve ?", answer: "Marshmello" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui chante 'Baby One More Time' ?", answer: "Britney Spears" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel groupe a chanté 'We Will Rock You' ?", answer: "Queen" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel instrument joue Elton John ?", answer: "Piano" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui chante 'Happy' ?", answer: "Pharrell Williams" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel est le prénom de Johnny Hallyday ?", answer: "Jean-Philippe" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui chante 'Hello' ?", answer: "Adele" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel instrument a 6 cordes ?", answer: "Guitare" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Qui est le roi de la Pop ?", answer: "Michael Jackson" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Facile", question: "Quel groupe chante 'Yellow Submarine' ?", answer: "The Beatles" },
-            // Moyen
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Quel groupe a chanté 'Bohemian Rhapsody' ?", answer: "Queen" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Quel instrument a des cordes et un archet ?", answer: "Le violon" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Qui a chanté 'La Bohème' ?", answer: "Charles Aznavour" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Qui est le rappeur de 'Gangsta's Paradise' ?", answer: "Coolio" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "De quelle ville viennent les Beatles ?", answer: "Liverpool" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Quel est le prénom de Beethoven ?", answer: "Ludwig" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Qui est le 'King' du Rock ?", answer: "Elvis Presley" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Quel rappeur a épousé Beyoncé ?", answer: "Jay-Z" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Qui a gagné l'Eurovision avec 'Waterloo' ?", answer: "ABBA" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Moyen", question: "Quel est l'instrument de Louis Armstrong ?", answer: "Trompette" },
-            // Difficile
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Quel groupe français chante 'L'Aventurier' ?", answer: "Indochine" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Quel groupe de rock a un éclair sur le visage ?", answer: "David Bowie" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Combien de touches a un piano standard ?", answer: "88" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Qui a composé 'Les Quatre Saisons' ?", answer: "Vivaldi" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Quel est le vrai nom de Lady Gaga ?", answer: "Stefani Germanotta" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "En quelle année est mort Freddie Mercury ?", answer: "1991" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Difficile", question: "Quel groupe chante 'Highway to Hell' ?", answer: "AC/DC" },
-            // Expert
-            { category: CATEGORIES.MUSIQUE, difficulty: "Expert", question: "Quel est l'opus de la 9ème symphonie de Beethoven ?", answer: "Opus 125" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Expert", question: "En quelle année est mort Kurt Cobain ?", answer: "1994" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Expert", question: "Qui a composé l'opéra 'La Flûte enchantée' ?", answer: "Mozart" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Expert", question: "Quel est le nom du dernier album des Beatles ?", answer: "Let It Be" },
-            { category: CATEGORIES.MUSIQUE, difficulty: "Expert", question: "Quel est le vrai nom de Sting ?", answer: "Gordon Sumner" },
-
-             // --- JEUX VIDÉO ---
-            // Facile
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quel est le prénom de Mario ?", answer: "Mario" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Dans quel jeu construit-on avec des blocs cubiques ?", answer: "Minecraft" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Dans quel jeu tire-t-on sur des oiseaux avec une fronde ?", answer: "Angry Birds" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Dans quel jeu y a-t-il des imposteurs ?", answer: "Among Us" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Dans quel jeu explore-t-on Hyrule ?", answer: "Zelda" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quelle est la couleur de Pac-Man ?", answer: "Jaune" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Dans quel jeu attrape-t-on des monstres ?", answer: "Pokémon" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quel hérisson est bleu et rapide ?", answer: "Sonic" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quelle console a été créée par Sony ?", answer: "PlayStation" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quel est le frère de Mario ?", answer: "Luigi" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quel jeu consiste à empiler des briques ?", answer: "Tetris" },
-            { category: CATEGORIES.JEUX, difficulty: "Facile", question: "Quel est le nom de la princesse dans Mario ?", answer: "Peach" },
-            // Moyen
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quel jeu de foot est le concurrent de PES ?", answer: "FIFA (ou EA FC)" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quelle est la couleur de la casquette de Luigi ?", answer: "Verte" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Qui est l'ennemi de Sonic ?", answer: "Dr. Robotnik (Eggman)" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quel est le nom de la princesse dans Mario ?", answer: "Peach" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quel jeu de guerre s'appelle CoD ?", answer: "Call of Duty" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Qui est l'héroïne de Tomb Raider ?", answer: "Lara Croft" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Dans quel jeu combat-on dans une arène Nintendo ?", answer: "Super Smash Bros" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quel gorille lance des tonneaux ?", answer: "Donkey Kong" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Dans quel jeu gère-t-on une ville ?", answer: "SimCity" },
-            { category: CATEGORIES.JEUX, difficulty: "Moyen", question: "Quelle console a suivi la PS3 ?", answer: "PS4" },
-            // Difficile
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Quel héros est un bandicoot ?", answer: "Crash Bandicoot" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Quel est le jeu de cartes de l'univers Warcraft ?", answer: "Hearthstone" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Quel est le nom du soldat vert dans Halo ?", answer: "Master Chief" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Qui est le héros de Metal Gear Solid ?", answer: "Solid Snake" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Quel studio a créé GTA ?", answer: "Rockstar Games" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Dans quel jeu incarne-t-on Kratos ?", answer: "God of War" },
-            { category: CATEGORIES.JEUX, difficulty: "Difficile", question: "Quel est le nom du dragon violet ?", answer: "Spyro" },
-            // Expert
-            { category: CATEGORIES.JEUX, difficulty: "Expert", question: "En quelle année est sortie la première PlayStation au Japon ?", answer: "1994" },
-            { category: CATEGORIES.JEUX, difficulty: "Expert", question: "Comment s'appelle le créateur de Mario ?", answer: "Shigeru Miyamoto" },
-            { category: CATEGORIES.JEUX, difficulty: "Expert", question: "Quel est le jeu le plus vendu de tous les temps ?", answer: "Minecraft" },
-            { category: CATEGORIES.JEUX, difficulty: "Expert", question: "Quel est le nom du héros de Final Fantasy VII ?", answer: "Cloud Strife" },
-            { category: CATEGORIES.JEUX, difficulty: "Expert", question: "En quelle année est sorti World of Warcraft ?", answer: "2004" },
-            
-            // --- SCIENCES ---
-            // Facile
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel est le symbole chimique de l'eau ?", answer: "H2O" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel gaz est nécessaire pour respirer ?", answer: "Oxygène" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "À combien de degrés l'eau gèle-t-elle ?", answer: "0°C" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel organe permet de penser ?", answer: "Le cerveau" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "De quelle couleur est le sang à l'intérieur du corps ?", answer: "Rouge" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Combien de pattes a une araignée ?", answer: "8" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel est l'animal le plus rapide (terrestre) ?", answer: "Le guépard" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quelle planète est la planète rouge ?", answer: "Mars" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel liquide coule dans nos veines ?", answer: "Le sang" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel astre nous éclaire le jour ?", answer: "Le Soleil" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Quel est le symbole de l'oxygène ?", answer: "O" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Facile", question: "Combien de planètes dans le système solaire ?", answer: "8" },
-            // Moyen
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quelle planète est la plus proche du soleil ?", answer: "Mercure" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quel est le plus grand mammifère ?", answer: "La baleine bleue" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quelle planète a des anneaux ?", answer: "Saturne" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quel est le symbole chimique de l'Or ?", answer: "Au" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Qui a inventé l'ampoule électrique ?", answer: "Thomas Edison" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Combien de dents a un adulte ?", answer: "32" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quel organe pompe le sang ?", answer: "Le coeur" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quelle force nous attire vers le sol ?", answer: "La gravité" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quel gaz est le plus léger ?", answer: "Hydrogène" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Moyen", question: "Quelle est la température du corps humain ?", answer: "37°C" },
-            // Difficile
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Combien d'os dans le corps humain (adulte) ?", answer: "206" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Quel est l'animal le plus rapide du monde (oiseau) ?", answer: "Le faucon pèlerin" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Qui a découvert la pénicilline ?", answer: "Alexander Fleming" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Quel est le gaz le plus abondant dans l'air ?", answer: "L'azote" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Quelle est la vitesse de la lumière ?", answer: "300 000 km/s" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Quel est l'organe le plus grand du corps ?", answer: "La peau" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Difficile", question: "Quelle planète tourne sur elle-même à l'envers ?", answer: "Vénus" },
-            // Expert
-            { category: CATEGORIES.SCIENCES, difficulty: "Expert", question: "Quel est le nom de la théorie de Darwin ?", answer: "L'évolution (sélection naturelle)" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Expert", question: "Quel est l'élément chimique le plus léger ?", answer: "L'Hydrogène" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Expert", question: "Combien de chromosomes a un être humain ?", answer: "46 (23 paires)" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Expert", question: "Qui a formulé la théorie de la relativité ?", answer: "Einstein" },
-            { category: CATEGORIES.SCIENCES, difficulty: "Expert", question: "Quel est le nom de la première brebis clonée ?", answer: "Dolly" },
-
-            // --- LITTÉRATURE ---
-            // Facile
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Qui est l'auteur de Harry Potter ?", answer: "J.K. Rowling" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel héros de BD est reporter ?", answer: "Tintin" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel est le nom du chien d'Obélix ?", answer: "Idéfix" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Qui est l'amoureux de Juliette ?", answer: "Roméo" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Dans quel conte trouve-t-on un loup et une grand-mère ?", answer: "Le Petit Chaperon Rouge" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel héros de BD est un cow-boy solitaire ?", answer: "Lucky Luke" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Qui a écrit Le Petit Prince ?", answer: "Antoine de Saint-Exupéry" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel personnage a un nez qui s'allonge quand il ment ?", answer: "Pinocchio" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel est le nom du capitaine dans Tintin ?", answer: "Haddock" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel gaulois est tombé dans la marmite ?", answer: "Obélix" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Qui est l'ami de Sherlock Holmes ?", answer: "Watson" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Facile", question: "Quel est le nom de la belle au bois dormant ?", answer: "Aurore" },
-            // Moyen
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui a écrit Les Misérables ?", answer: "Victor Hugo" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui a écrit Les Trois Mousquetaires ?", answer: "Alexandre Dumas" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui a écrit 'Vingt mille lieues sous les mers' ?", answer: "Jules Verne" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Quel détective habite Baker Street ?", answer: "Sherlock Holmes" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui est l'auteur des Fables ?", answer: "Jean de La Fontaine" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui est le créateur de Tintin ?", answer: "Hergé" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Quel est le nom de l'épée du Roi Arthur ?", answer: "Excalibur" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui est le compagnon de Sherlock Holmes ?", answer: "Dr. Watson" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Dans quel pays se passe l'histoire de Manga généralement ?", answer: "Japon" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Moyen", question: "Qui a écrit 'Notre-Dame de Paris' ?", answer: "Victor Hugo" },
-            // Difficile
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Quel poète a écrit 'Les Fleurs du Mal' ?", answer: "Baudelaire" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Quel est le vrai nom de Molière ?", answer: "Jean-Baptiste Poquelin" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Qui a écrit 'L'Avare' ?", answer: "Molière" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Qui a écrit 'Orgueil et Préjugés' ?", answer: "Jane Austen" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Qui a écrit '1984' ?", answer: "George Orwell" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Quel est le prénom de Zola ?", answer: "Émile" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Difficile", question: "Qui a écrit 'Madame Bovary' ?", answer: "Gustave Flaubert" },
-            // Expert
-            { category: CATEGORIES.LITTERATURE, difficulty: "Expert", question: "Qui a écrit 'À la recherche du temps perdu' ?", answer: "Marcel Proust" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Expert", question: "Quel est le livre le plus vendu au monde (hors Bible) ?", answer: "Don Quichotte" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Expert", question: "Qui a écrit 'L'Étranger' ?", answer: "Albert Camus" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Expert", question: "Qui a écrit 'La Divine Comédie' ?", answer: "Dante" },
-            { category: CATEGORIES.LITTERATURE, difficulty: "Expert", question: "Quel auteur français a refusé le prix Nobel ?", answer: "Jean-Paul Sartre" }
-        ];
-
-        // --- AUDIO ---
-        const playBeep = (type = 'CORRECT') => {
+        // --- AUDIO ENGINE ---
+        const playSound = (type = 'CORRECT') => {
             try {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 if (!AudioContext) return;
@@ -570,45 +672,124 @@
             } catch (e) {}
         };
 
-        const shuffleArray = (array) => {
-            let currentIndex = array.length, randomIndex;
-            const newArray = [...array];
-            while (currentIndex != 0) {
-                randomIndex = Math.floor(Math.random() * currentIndex);
-                currentIndex--;
-                [newArray[currentIndex], newArray[randomIndex]] = [newArray[randomIndex], newArray[currentIndex]];
-            }
-            return newArray;
-        };
-
         const App = () => {
             // --- ETATS ---
-            const [gameState, setGameState] = useState('setup'); 
-            const [selectedCategory, setSelectedCategory] = useState(CATEGORIES.ALL);
-            
-            const [players, setPlayers] = useState([
-                { id: 1, name: 'Joueur 1', time: 60, status: 'alive', jokers: 1 },
-                { id: 2, name: 'Joueur 2', time: 60, status: 'alive', jokers: 1 }
-            ]);
+            const [settings, setSettings] = useState({
+                initialTime: 60,
+                suddenDeath: false,
+                soundEnabled: true,
+                musicEnabled: false
+            });
 
-            const [activePlayerIndex, setActivePlayerIndex] = useState(0); 
-            const [questions, setQuestions] = useState([]);
-            const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-            const [initialTime, setInitialTime] = useState(60);
+            const [gameState, setGameState] = useState('setup');
+            const [players, setPlayers] = useState([
+                { id: 1, name: 'Joueur 1', time: 60, status: 'alive', jokers: 1, avatar: '' },
+                { id: 2, name: 'Joueur 2', time: 60, status: 'alive', jokers: 1, avatar: '' }
+            ]);
+            const [categories, setCategories] = useState(INITIAL_CATEGORIES);
+            const [customQuestions, setCustomQuestions] = useState([]);
+            const [allQuestions, setAllQuestions] = useState([...BASE_QUESTIONS]); 
+
+            const [activePlayerIndex, setActivePlayerIndex] = useState(0);
+            const [currentQ, setCurrentQ] = useState(null);
             const [winner, setWinner] = useState(null);
             const [isTimerRunning, setIsTimerRunning] = useState(false);
-            
-            const [history, setHistory] = useState([]); 
+            const [selectedCategory, setSelectedCategory] = useState("TOUT MÉLANGER");
+
             const [showHistory, setShowHistory] = useState(false);
+            const [showImport, setShowImport] = useState(false);
+            const [history, setHistory] = useState([]);
             const [isAdminMode, setIsAdminMode] = useState(false);
+            const [penaltyAnim, setPenaltyAnim] = useState(null);
             const [isFullscreen, setIsFullscreen] = useState(false);
-            const [soundEnabled, setSoundEnabled] = useState(true);
-            const [antiCheatEnabled, setAntiCheatEnabled] = useState(true); 
-            const [penaltyAnim, setPenaltyAnim] = useState(null); 
+            const [prevState, setPrevState] = useState(null);
 
             const timerRef = useRef(null);
+            const musicRef = useRef(null); 
+            const saveTimeoutRef = useRef(null);
+            const fileInputRef = useRef(null);
 
-            // --- TIMER LOOP ---
+            // --- GENERATEUR DE QUESTIONS ---
+            const generateQuestions = useCallback(() => {
+                let generated = [...BASE_QUESTIONS];
+
+                // Géographie
+                DATA_SETS.COUNTRIES.forEach(([country, capital, diff]) => {
+                    generated.push({ category: "Géographie", difficulty: diff, question: `Quelle est la capitale de : ${country} ?`, answer: capital });
+                    if (diff === 'Facile' || diff === 'Moyen') {
+                        generated.push({ category: "Géographie", difficulty: diff === 'Facile' ? 'Moyen' : 'Difficile', question: `${capital} est la capitale de quel pays ?`, answer: country });
+                    }
+                });
+
+                // Sciences (Éléments)
+                DATA_SETS.ELEMENTS.forEach(([symbol, name, diff]) => {
+                    generated.push({ category: "Sciences & Nature", difficulty: diff, question: `Quel est le symbole chimique de : ${name} ?`, answer: symbol });
+                });
+                
+                // Littérature
+                DATA_SETS.AUTHORS.forEach(([book, author, diff]) => {
+                    generated.push({ category: "Littérature & BD", difficulty: diff, question: `Qui a écrit "${book}" ?`, answer: author });
+                });
+
+                return generated;
+            }, []);
+
+            // Initial Load
+            useEffect(() => {
+                const gen = generateQuestions();
+                setAllQuestions([...gen, ...customQuestions]);
+            }, [customQuestions, generateQuestions]);
+
+            // --- AUTO SAVE ---
+            useEffect(() => {
+                const savedData = localStorage.getItem('coup_fatal_save_v2');
+                if (savedData) {
+                    try {
+                        const parsed = JSON.parse(savedData);
+                        if (confirm("Une partie sauvegardée a été trouvée. Reprendre ?")) {
+                            setSettings(parsed.settings || settings);
+                            setPlayers(parsed.players || players);
+                            setCustomQuestions(parsed.customQuestions || []);
+                            // Pas besoin de save allQuestions, on regenère
+                            if (parsed.gameState === 'playing') {
+                                setGameState('playing');
+                                setCurrentQ(parsed.currentQ);
+                                setActivePlayerIndex(parsed.activePlayerIndex || 0);
+                                setHistory(parsed.history || []);
+                            }
+                        }
+                    } catch (e) { console.error(e); }
+                }
+            }, []);
+
+            useEffect(() => {
+                if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+                saveTimeoutRef.current = setTimeout(() => {
+                    const dataToSave = {
+                        settings, players, customQuestions, gameState, currentQ, activePlayerIndex, history
+                    };
+                    localStorage.setItem('coup_fatal_save_v2', JSON.stringify(dataToSave));
+                }, 1000);
+            }, [settings, players, customQuestions, gameState, currentQ, activePlayerIndex, history]);
+
+            // --- MUSIQUE ---
+            useEffect(() => {
+                if (!settings.musicEnabled || gameState !== 'playing' || !isTimerRunning) {
+                    if (musicRef.current) { clearInterval(musicRef.current); musicRef.current = null; }
+                    return;
+                }
+                const currentPlayer = players[activePlayerIndex];
+                let interval = 1000; 
+                if (settings.suddenDeath && currentPlayer.time < 5) interval = 250; 
+                else if (currentPlayer.time < 10) interval = 500; 
+                if (musicRef.current) clearInterval(musicRef.current);
+                musicRef.current = setInterval(() => {
+                    playSound(interval === 1000 ? 'BEAT_LOW' : 'BEAT_HIGH');
+                }, interval);
+                return () => clearInterval(musicRef.current);
+            }, [isTimerRunning, activePlayerIndex, players, settings.musicEnabled, settings.suddenDeath]);
+
+            // --- TIMER ---
             useEffect(() => {
                 if (gameState === 'playing' && isTimerRunning) {
                     timerRef.current = setInterval(() => {
@@ -631,30 +812,30 @@
                 return () => clearInterval(timerRef.current);
             }, [gameState, isTimerRunning, activePlayerIndex]);
 
-            // --- KEYS ---
+            // --- CLAVIER ---
             useEffect(() => {
                 const handleKeyDown = (e) => {
                     if (gameState !== 'playing') return;
                     if (e.code === 'Space') { e.preventDefault(); toggleTimer(); }
                     if (e.code === 'ArrowRight') handleCorrect();
                     if (e.code === 'ArrowLeft') handleWrong();
-                    if (e.code === 'ArrowUp') handleSkip();
                 };
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
-            }, [gameState, isTimerRunning, activePlayerIndex, questions, currentQuestionIndex, players, soundEnabled]);
+            }, [gameState, isTimerRunning, activePlayerIndex, currentQ, players]);
 
             // --- ACTIONS ---
             const addPlayer = () => {
                 const newId = players.length > 0 ? Math.max(...players.map(p => p.id)) + 1 : 1;
-                setPlayers([...players, { id: newId, name: `Joueur ${players.length + 1}`, time: initialTime, status: 'alive', jokers: 1 }]);
+                setPlayers([...players, { id: newId, name: `Joueur ${players.length + 1}`, time: settings.initialTime, status: 'alive', jokers: 1, avatar: '' }]);
             };
+
             const removePlayer = (id) => {
                 if (players.length > 2) setPlayers(players.filter(p => p.id !== id));
             };
-            const updatePlayerName = (id, newName) => {
-                setPlayers(players.map(p => p.id === id ? { ...p, name: newName } : p));
-            };
+
+            const updatePlayerName = (id, newName) => setPlayers(players.map(p => p.id === id ? { ...p, name: newName } : p));
+
             const toggleFullscreen = () => {
                 if (!document.fullscreenElement) {
                     document.documentElement.requestFullscreen();
@@ -666,155 +847,303 @@
                     }
                 }
             };
+
             const adjustTime = (playerId, amount) => {
-                setPlayers(players.map(p => p.id === playerId ? { ...p, time: Math.max(0, p.time + amount) } : p));
+                setPlayers(players.map(p => {
+                    if (p.id === playerId) {
+                        return { ...p, time: Math.max(0, p.time + amount) };
+                    }
+                    return p;
+                }));
             };
+
             const resetPlayerTime = (playerId) => {
-                setPlayers(players.map(p => p.id === playerId ? { ...p, time: initialTime, status: 'alive', jokers: 1 } : p));
-            };
-
-            // --- GAME LOGIC ---
-            const loadQuestions = () => {
-                let gameQuestions = [];
-                if (selectedCategory === CATEGORIES.ALL) {
-                    gameQuestions = [...ALL_QUESTIONS];
-                } else {
-                    gameQuestions = ALL_QUESTIONS.filter(q => q.category === selectedCategory);
-                }
-                if (gameQuestions.length < 5) gameQuestions = [...ALL_QUESTIONS];
-                return shuffleArray(gameQuestions);
-            };
-
-            const startGame = () => {
-                const qs = loadQuestions();
-                setQuestions(qs);
-                setHistory([]); 
-                const resetPlayers = players.map(p => ({ ...p, time: initialTime, status: 'alive', jokers: 1 }));
-                setPlayers(resetPlayers);
-                setCurrentQuestionIndex(0);
-                setActivePlayerIndex(0);
-                setGameState('playing');
-                setWinner(null);
-                setIsTimerRunning(false);
-                setShowHistory(false);
-            };
-
-            const restartGameSamePlayers = () => {
-                const qs = loadQuestions();
-                setQuestions(qs);
-                setHistory([]); 
-                const resetPlayers = players.map(p => ({ ...p, time: initialTime, status: 'alive', jokers: 1 }));
-                setPlayers(resetPlayers);
-                setCurrentQuestionIndex(0);
-                setActivePlayerIndex(0); 
-                setWinner(null);
-                setIsTimerRunning(false);
-                setGameState('playing');
-            };
-
-            const toggleTimer = () => setIsTimerRunning(!isTimerRunning);
-
-            const addToHistory = (status, skipped = false) => {
-                const currentQ = questions[currentQuestionIndex];
-                const currentPlayer = players[activePlayerIndex];
-                setHistory(prev => [{
-                    question: currentQ.question,
-                    answer: currentQ.answer,
-                    playerName: currentPlayer.name,
-                    status: skipped ? 'passé' : status,
-                    timestamp: new Date().toLocaleTimeString()
-                }, ...prev]);
-            };
-
-            const handleCorrect = () => {
-                if (soundEnabled) playBeep('CORRECT');
-                setIsTimerRunning(false);
-                addToHistory('correct');
-                setPlayers(prevPlayers => prevPlayers.map((p, index) => {
-                    if (index === activePlayerIndex) {
-                        if (p.time > 0 && p.time < 5) return { ...p, time: 5 };
-                    }
+                setPlayers(players.map(p => {
+                    if (p.id === playerId) return { ...p, time: settings.initialTime, status: 'alive', jokers: 1 };
                     return p;
                 }));
-                switchPlayer();
-                nextQuestion();
             };
 
-            const handleWrong = () => {
-                if (soundEnabled) playBeep('WRONG');
-                const currentPlayerId = players[activePlayerIndex].id;
-                setPenaltyAnim({ playerId: currentPlayerId, id: Date.now() });
-                setTimeout(() => setPenaltyAnim(null), 1000); 
-                setPlayers(prevPlayers => prevPlayers.map((p, index) => {
-                    if (index === activePlayerIndex) {
-                        return { ...p, time: Math.max(0, p.time - 2) };
-                    }
-                    return p;
-                }));
-                addToHistory('wrong');
-                nextQuestion();
+            const saveStateForUndo = () => {
+                setPrevState({
+                    players: JSON.parse(JSON.stringify(players)),
+                    activePlayerIndex,
+                    currentQ,
+                    history: [...history],
+                    isTimerRunning
+                });
             };
 
-            const handleSkip = () => {
-                addToHistory('wrong', true);
-                nextQuestion();
-            };
-
-            const handleJoker = () => {
-                const currentPlayer = players[activePlayerIndex];
-                if (currentPlayer.jokers > 0) {
-                    if (soundEnabled) playBeep('JOKER');
-                    setPlayers(prev => prev.map((p, i) => i === activePlayerIndex ? { ...p, jokers: p.jokers - 1 } : p));
-                    addToHistory('joker', true);
-                    nextQuestion();
-                }
-            };
-
-            const switchPlayer = () => {
-                let nextIndex = activePlayerIndex;
-                let loopCount = 0;
-                do {
-                    nextIndex = (nextIndex + 1) % players.length;
-                    loopCount++;
-                } while (players[nextIndex].status !== 'alive' && loopCount < players.length);
-                setActivePlayerIndex(nextIndex);
+            const handleUndo = () => {
+                if (!prevState) return;
+                if (settings.soundEnabled) playSound('UNDO');
+                setPlayers(prevState.players);
+                setActivePlayerIndex(prevState.activePlayerIndex);
+                setCurrentQ(prevState.currentQ);
+                setHistory(prevState.history);
+                setIsTimerRunning(false); 
+                setPrevState(null);
             };
 
             const handlePlayerEliminated = (currentPlayersState) => {
-                clearInterval(timerRef.current);
                 setIsTimerRunning(false);
-                if (soundEnabled) playBeep('END');
+                if (settings.soundEnabled) playSound('END');
                 const survivors = currentPlayersState.filter(p => p.status === 'alive');
                 if (survivors.length === 1) {
                     setWinner(survivors[0].name);
                     setGameState('ended');
                 } else {
                     let nextIndex = activePlayerIndex;
-                    let loopCount = 0;
-                    do {
-                        nextIndex = (nextIndex + 1) % currentPlayersState.length;
-                        loopCount++;
-                    } while (currentPlayersState[nextIndex].status !== 'alive' && loopCount < currentPlayersState.length);
+                    let loop = 0;
+                    do { nextIndex = (nextIndex + 1) % currentPlayersState.length; loop++; }
+                    while (currentPlayersState[nextIndex].status !== 'alive' && loop < currentPlayersState.length);
                     setActivePlayerIndex(nextIndex);
                 }
             };
 
-            const nextQuestion = () => {
-                setCurrentQuestionIndex(prev => {
-                    if (prev + 1 >= questions.length) {
-                        setQuestions(shuffleArray(questions));
-                        return 0;
-                    }
-                    return prev + 1;
-                });
+            // --- SYSTÈME DE COOLDOWN ET FILTRAGE ---
+            const getUsedQuestionsLog = () => {
+                const log = localStorage.getItem(HISTORY_STORAGE_KEY);
+                return log ? JSON.parse(log) : [];
             };
 
-            // --- RENDER HELPERS ---
+            const saveUsedQuestionsLog = (log) => {
+                localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(log));
+            };
+
+            const markQuestionAsUsed = (question) => {
+                const log = getUsedQuestionsLog();
+                const newLog = [...log, question.question]; 
+                if (newLog.length > MAX_HISTORY_SIZE) {
+                    newLog.splice(0, newLog.length - MAX_HISTORY_SIZE);
+                }
+                saveUsedQuestionsLog(newLog);
+            };
+
+            // ALGORITHME DE DIFFICULTÉ DYNAMIQUE + FILTRAGE
+            const getWeightedQuestion = () => {
+                const currentPlayer = players[activePlayerIndex];
+                const ratio = currentPlayer.time / settings.initialTime;
+                
+                let weights = { Facile: 0.25, Moyen: 0.5, Difficile: 0.2, Expert: 0.05 }; 
+
+                if (ratio > 0.66) { // Early Game
+                    weights = { Facile: 0.45, Moyen: 0.45, Difficile: 0.05, Expert: 0.05 };
+                } else if (ratio < 0.33) { // Late Game
+                    weights = { Facile: 0.05, Moyen: 0.20, Difficile: 0.55, Expert: 0.20 };
+                } else { // Mid Game
+                    weights = { Facile: 0.20, Moyen: 0.40, Difficile: 0.30, Expert: 0.10 };
+                }
+
+                // 1. Filtrer par catégorie
+                let pool = [];
+                if (selectedCategory === "TOUT MÉLANGER") pool = [...allQuestions];
+                else pool = allQuestions.filter(q => q.category === selectedCategory);
+
+                // 2. Filtrer les questions déjà posées (Cooldown)
+                const usedLog = getUsedQuestionsLog();
+                const freshPool = pool.filter(q => !usedLog.includes(q.question));
+
+                const finalPool = freshPool.length > 0 ? freshPool : pool;
+
+                if (finalPool.length === 0) return { question: "Erreur: Pas de questions", answer: "...", difficulty: "N/A" };
+
+                // 3. Sélection par difficulté
+                const rand = Math.random();
+                let selectedDiff = "Moyen";
+                if (rand < weights.Facile) selectedDiff = "Facile";
+                else if (rand < weights.Facile + weights.Moyen) selectedDiff = "Moyen";
+                else if (rand < weights.Facile + weights.Moyen + weights.Difficile) selectedDiff = "Difficile";
+                else selectedDiff = "Expert";
+
+                // Filter by difficulty
+                let diffPool = finalPool.filter(q => q.difficulty === selectedDiff);
+                if (diffPool.length === 0) diffPool = finalPool; // Fallback
+
+                // Pick random question
+                const picked = diffPool[Math.floor(Math.random() * diffPool.length)];
+                return picked;
+            };
+
+            const handleCorrect = () => {
+                saveStateForUndo();
+                if (settings.soundEnabled) playSound('CORRECT');
+                setIsTimerRunning(false); 
+
+                if (currentQ) markQuestionAsUsed(currentQ);
+
+                setPlayers(prev => prev.map((p, i) => {
+                    if (i === activePlayerIndex) {
+                        if (settings.suddenDeath && p.time < 5) return p;
+                        if (p.time > 0 && p.time < 5) return { ...p, time: 5 };
+                    }
+                    return p;
+                }));
+                nextTurn();
+            };
+
+            const handleWrong = () => {
+                saveStateForUndo();
+                if (settings.soundEnabled) playSound('WRONG');
+                const currentPlayer = players[activePlayerIndex];
+                
+                if (settings.suddenDeath && currentPlayer.time < 5) {
+                    const newPlayers = players.map((p, i) => i === activePlayerIndex ? { ...p, time: 0, status: 'eliminated' } : p);
+                    setPlayers(newPlayers);
+                    handlePlayerEliminated(newPlayers);
+                    return;
+                }
+
+                if (currentQ) markQuestionAsUsed(currentQ);
+
+                addToHistory('wrong');
+                setCurrentQ(getWeightedQuestion());
+            };
+
+            const handleSkip = () => {
+                if (currentQ) markQuestionAsUsed(currentQ);
+                addToHistory('wrong', true);
+                setCurrentQ(getWeightedQuestion());
+            };
+
+            const nextTurn = () => {
+                let nextIndex = activePlayerIndex;
+                let loop = 0;
+                do { nextIndex = (nextIndex + 1) % players.length; loop++; }
+                while (players[nextIndex].status !== 'alive' && loop < players.length);
+                setActivePlayerIndex(nextIndex);
+                setCurrentQ(getWeightedQuestion());
+            };
+
+            const startGame = () => {
+                const resetPlayers = players.map(p => ({ ...p, time: settings.initialTime, status: 'alive', jokers: 1 }));
+                setPlayers(resetPlayers);
+                setActivePlayerIndex(0);
+                setGameState('playing');
+                setWinner(null);
+                setIsTimerRunning(false);
+                setPrevState(null);
+                setHistory([]);
+                setTimeout(() => setCurrentQ(getWeightedQuestion()), 10);
+            };
+
+            const restartGameSamePlayers = () => {
+                setHistory([]); 
+                const resetPlayers = players.map(p => ({ ...p, time: settings.initialTime, status: 'alive', jokers: 1 }));
+                setPlayers(resetPlayers);
+                setActivePlayerIndex(0); 
+                setWinner(null);
+                setIsTimerRunning(false);
+                setGameState('playing');
+                setPrevState(null);
+                setTimeout(() => setCurrentQ(getWeightedQuestion()), 0);
+            };
+
+            const toggleTimer = () => setIsTimerRunning(!isTimerRunning);
+
+            const addToHistory = (status, skipped = false) => {
+                if (!currentQ) return;
+                const currentPlayer = players[activePlayerIndex];
+                setHistory(prev => [{
+                    question: currentQ.question, answer: currentQ.answer, playerName: currentPlayer.name, status: skipped ? 'passé' : status, timestamp: new Date().toLocaleTimeString()
+                }, ...prev]);
+            };
+
+            // --- FILE MANAGEMENT ---
+            const exportData = () => {
+                const dataStr = JSON.stringify(customQuestions, null, 2);
+                const blob = new Blob([dataStr], {type: "application/json"});
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = "coup_fatal_questions.json";
+                link.href = url;
+                link.click();
+            };
+
+            const importData = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const json = JSON.parse(e.target.result);
+                        if (Array.isArray(json)) {
+                            setCustomQuestions(prev => [...prev, ...json]);
+                            alert(`${json.length} questions importées avec succès !`);
+                        } else {
+                            alert("Format invalide. Doit être un tableau JSON.");
+                        }
+                    } catch (err) { alert("Erreur de lecture du fichier."); }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- IMPORT MENU ---
+            const ImportMenu = () => {
+                const [newQ, setNewQ] = useState({ category: "", difficulty: "Moyen", question: "", answer: "" });
+                const addQuestion = () => {
+                    if (!newQ.category || !newQ.question || !newQ.answer) return alert("Remplissez tout !");
+                    setCustomQuestions(prev => [...prev, newQ]);
+                    setNewQ({ ...newQ, question: "", answer: "" });
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-slate-900/95 z-50 flex items-center justify-center p-4">
+                        <div className="bg-slate-800 w-full max-w-4xl h-[90vh] rounded-2xl flex flex-col border border-slate-600 shadow-2xl">
+                            <div className="p-6 border-b border-slate-700 flex justify-between">
+                                <h2 className="text-2xl font-bold text-yellow-400 flex items-center gap-2"><Icons.Upload/> Centre d'Import & Base de Données</h2>
+                                <button onClick={() => setShowImport(false)}><Icons.XCircle className="text-slate-400 hover:text-white"/></button>
+                            </div>
+                            <div className="flex-1 flex overflow-hidden">
+                                <div className="w-1/2 p-6 overflow-y-auto border-r border-slate-700 space-y-4">
+                                    <h3 className="font-bold text-lg mb-4 text-blue-300">Ajouter Manuellement</h3>
+                                    <select className="w-full bg-slate-900 p-2 rounded border border-slate-600 mb-2" value={newQ.category} onChange={e => setNewQ({...newQ, category: e.target.value})}>
+                                        <option value="">Catégorie...</option>
+                                        {Object.values(INITIAL_CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <select className="w-full bg-slate-900 p-2 rounded border border-slate-600 mb-2" value={newQ.difficulty} onChange={e => setNewQ({...newQ, difficulty: e.target.value})}>
+                                        <option>Facile</option><option>Moyen</option><option>Difficile</option><option>Expert</option>
+                                    </select>
+                                    <input className="w-full bg-slate-900 p-2 rounded border border-slate-600 mb-2" placeholder="Question" value={newQ.question} onChange={e => setNewQ({...newQ, question: e.target.value})} />
+                                    <input className="w-full bg-slate-900 p-2 rounded border border-slate-600 mb-4" placeholder="Réponse" value={newQ.answer} onChange={e => setNewQ({...newQ, answer: e.target.value})} />
+                                    <button onClick={addQuestion} className="w-full bg-green-600 py-2 rounded font-bold hover:bg-green-500">Ajouter</button>
+
+                                    <div className="mt-8 border-t border-slate-700 pt-4">
+                                        <h3 className="font-bold text-lg mb-4 text-purple-300">Gestion de Fichier JSON</h3>
+                                        <div className="flex gap-2 mb-2">
+                                            <button onClick={() => fileInputRef.current.click()} className="flex-1 bg-slate-700 py-2 rounded hover:bg-slate-600 flex items-center justify-center gap-2"><Icons.FileUp className="w-4 h-4"/> Charger un fichier</button>
+                                            <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={importData} />
+                                            <button onClick={exportData} className="flex-1 bg-slate-700 py-2 rounded hover:bg-slate-600 flex items-center justify-center gap-2"><Icons.Download className="w-4 h-4"/> Sauvegarder</button>
+                                        </div>
+                                        <p className="text-xs text-slate-500">Format: Tableau d'objets `&#123;category, difficulty, question, answer&#125;`</p>
+                                    </div>
+                                </div>
+                                <div className="w-1/2 p-6 overflow-y-auto bg-slate-900/50">
+                                    <h3 className="font-bold text-lg mb-2">Total Questions : {allQuestions.length}</h3>
+                                    <p className="text-xs text-slate-400 mb-4">Dont {customQuestions.length} personnalisées</p>
+                                    <div className="space-y-2">
+                                        {customQuestions.map((q, i) => (
+                                            <div key={i} className="bg-slate-800 p-3 rounded border border-slate-700 text-sm relative group">
+                                                <span className="text-xs text-blue-400 font-bold uppercase">{q.category}</span>
+                                                <p className="font-semibold">{q.question}</p>
+                                                <p className="text-green-400">{q.answer}</p>
+                                                <button onClick={() => setCustomQuestions(customQuestions.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100"><Icons.Trash className="w-4 h-4"/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
             const formatTime = (seconds) => {
                 const s = Math.max(0, Math.floor(seconds));
                 const ms = Math.floor((Math.max(0, seconds) - s) * 10);
                 return <span>{s < 10 ? `0${s}` : s}<span className="text-sm">.{ms}</span></span>;
             };
+
             const getGridClass = () => {
                 const count = players.length;
                 if (count <= 2) return "grid-cols-2";
@@ -822,7 +1151,6 @@
                 return "grid-cols-3";
             };
 
-            // Modal Historique
             const renderHistoryModal = () => (
                 <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-slate-900 w-full max-w-2xl rounded-2xl max-h-[80vh] flex flex-col border border-slate-700 shadow-2xl">
@@ -831,9 +1159,9 @@
                             <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-white"><Icons.XCircle className="w-6 h-6"/></button>
                         </div>
                         <div className="overflow-y-auto p-4 space-y-3">
-                            {history.length === 0 ? <p className="text-center text-slate-500">Aucune question.</p> : 
+                            {history.length === 0 ? <p className="text-center text-slate-500">Aucune question posée.</p> : 
                             history.map((entry, i) => (
-                                <div key={i} className={`p-3 rounded border border-slate-700 flex justify-between items-start ${entry.status === 'correct' ? 'bg-green-900/20' : entry.status === 'joker' ? 'bg-purple-900/20' : 'bg-red-900/20'}`}>
+                                <div key={i} className={`p-3 rounded border border-slate-700 flex justify-between items-start ${entry.status === 'correct' ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
                                     <div>
                                         <div className="flex gap-2 mb-1">
                                             <span className="font-bold text-sm text-yellow-200">{entry.playerName}</span>
@@ -842,9 +1170,7 @@
                                         <p className="font-semibold text-white">{entry.question}</p>
                                         <p className="text-sm text-slate-400">Rép: {entry.answer}</p>
                                     </div>
-                                    <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${entry.status === 'correct' ? 'bg-green-600' : entry.status === 'joker' ? 'bg-purple-600' : 'bg-red-600'}`}>
-                                        {entry.status}
-                                    </span>
+                                    <span className={`text-xs font-bold px-2 py-1 rounded uppercase ${entry.status === 'correct' ? 'bg-green-600' : 'bg-red-600'}`}>{entry.status}</span>
                                 </div>
                             ))}
                         </div>
@@ -852,203 +1178,155 @@
                 </div>
             );
 
-            // --- SETUP SCREEN ---
-            if (gameState === 'setup') {
-                return (
-                    <div className="flex flex-col items-center justify-center min-h-screen p-4 space-y-6">
-                        <div className="text-center">
-                            <h1 className="text-5xl font-black mb-2 text-yellow-400 neon-text">LE DUEL</h1>
-                            <p className="text-blue-200">Mode "Coup Fatal" - Ultimate +</p>
-                        </div>
-                        
-                        <div className="flex flex-col md:flex-row gap-6 w-full max-w-6xl h-[80vh]">
-                            <div className="card-glass p-6 rounded-2xl flex-1 overflow-y-auto border-t-4 border-blue-500">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-xl text-yellow-400">Joueurs</h3>
-                                    <button onClick={addPlayer} className="bg-blue-600 p-2 rounded-full hover:bg-blue-500 transition"><Icons.Plus className="w-5 h-5"/></button>
-                                </div>
-                                <div className="space-y-3 mb-6">
-                                    {players.map((player, index) => (
-                                        <div key={player.id} className="flex gap-2 items-center">
-                                            <span className="text-slate-400 font-bold w-6">{index + 1}.</span>
-                                            <input type="text" value={player.name} onChange={(e) => updatePlayerName(player.id, e.target.value)} className="flex-1 bg-slate-800 border border-slate-600 rounded p-2 text-white focus:border-yellow-400 outline-none" placeholder={`Joueur ${index + 1}`} />
-                                            {players.length > 2 && <button onClick={() => removePlayer(player.id)} className="text-red-400 hover:text-red-300 p-2"><Icons.Trash className="w-5 h-5"/></button>}
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="border-t border-slate-700 pt-4 space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-bold mb-2">Temps de départ (sec)</label>
-                                        <input type="number" value={initialTime} onChange={(e) => setInitialTime(parseInt(e.target.value))} className="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white focus:border-yellow-400 outline-none font-mono text-xl text-center" />
-                                    </div>
-                                    {/* Option Anti-Triche */}
-                                    <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-lg border border-slate-700">
-                                        <span className="text-sm font-bold flex items-center gap-2"><Icons.EyeOff className="w-4 h-4"/> Masquer la question en pause ?</span>
-                                        <button onClick={() => setAntiCheatEnabled(!antiCheatEnabled)} className={`w-12 h-6 rounded-full p-1 transition-colors ${antiCheatEnabled ? 'bg-green-500' : 'bg-slate-600'}`}>
-                                            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${antiCheatEnabled ? 'translate-x-6' : 'translate-x-0'}`}></div>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="card-glass p-6 rounded-2xl flex-1 flex flex-col border-t-4 border-yellow-500">
-                                <h3 className="font-bold text-xl text-yellow-400 mb-4 text-center">Choisis ton Thème</h3>
-                                <div className="grid grid-cols-2 gap-3 overflow-y-auto flex-1 content-start">
-                                    {Object.values(CATEGORIES).map((cat) => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} className={`category-btn p-3 rounded-lg border-2 text-sm font-bold text-center ${selectedCategory === cat ? 'category-selected' : 'border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300'}`}>
-                                            {cat}
-                                        </button>
-                                    ))}
-                                </div>
-                                <button onClick={startGame} className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-slate-900 font-black py-4 rounded-xl text-xl mt-4 shadow-lg transform transition active:scale-95 flex items-center justify-center gap-2">
-                                    <Icons.Play className="w-6 h-6"/> C'EST PARTI !
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
-
-            if (gameState === 'ended') {
-                return (
-                    <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
-                        {showHistory && renderHistoryModal()}
-                        <Icons.Trophy className="w-20 h-20 text-yellow-400 mb-4 animate-bounce"/>
-                        <h2 className="text-2xl text-white mb-2">Le vainqueur est</h2>
-                        <h1 className="text-6xl font-black text-yellow-400 neon-text mb-8">{winner}</h1>
-                        <div className="flex flex-wrap gap-4 justify-center">
-                            <button onClick={() => setShowHistory(true)} className="bg-slate-700 hover:bg-slate-600 px-6 py-3 rounded-lg font-bold flex items-center gap-2"><Icons.History className="w-5 h-5"/> Historique</button>
-                            <button onClick={() => setGameState('setup')} className="bg-slate-700 hover:bg-slate-600 px-6 py-3 rounded-lg font-bold flex items-center gap-2"><Icons.Settings className="w-5 h-5"/> Menu</button>
-                            <button onClick={restartGameSamePlayers} className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-lg font-bold flex items-center gap-2 text-white shadow-lg transform hover:scale-105 transition"><Icons.Zap className="w-5 h-5"/> Revanche Immédiate</button>
-                            <button onClick={startGame} className="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-lg font-bold flex items-center gap-2"><Icons.RotateCcw className="w-5 h-5"/> Rejouer (Setup)</button>
-                        </div>
-                    </div>
-                );
-            }
-
-            const currentQ = questions[currentQuestionIndex] || { category: '...', question: '...', answer: '...', difficulty: 'Moyen' };
-            const currentPlayer = players[activePlayerIndex];
+            // --- RENDER ---
+            const qToRender = currentQ || { category: "...", question: "Prêt ?", answer: "...", difficulty: "Moyen" };
+            const isSuddenDeathActive = settings.suddenDeath && gameState === 'playing';
 
             return (
-                <div className="flex flex-col min-h-screen max-w-7xl mx-auto p-4">
+                <div className={`min-h-screen flex flex-col ${isSuddenDeathActive && players[activePlayerIndex]?.time < 5 ? 'sudden-death-bg' : ''} transition-colors duration-1000`}>
+                    {showImport && <ImportMenu />}
                     {showHistory && renderHistoryModal()}
-
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex gap-2">
-                             <button onClick={() => setGameState('setup')} className="text-slate-400 hover:text-white p-2" title="Menu"><Icons.Settings className="w-6 h-6"/></button>
-                             <button onClick={() => setShowHistory(true)} className="text-slate-400 hover:text-blue-400 p-2" title="Historique"><Icons.History className="w-6 h-6"/></button>
-                             <button onClick={() => setIsAdminMode(!isAdminMode)} className={`p-2 transition ${isAdminMode ? 'text-red-400 animate-pulse' : 'text-slate-400 hover:text-white'}`} title="Mode Arbitre"><Icons.Shield className="w-6 h-6"/></button>
-                             <button onClick={toggleFullscreen} className="text-slate-400 hover:text-white p-2" title="Plein Écran"><Icons.Maximize className="w-6 h-6"/></button>
-                             <button onClick={() => setSoundEnabled(!soundEnabled)} className="text-slate-400 hover:text-white p-2" title="Son">{soundEnabled ? <Icons.Volume2 className="w-6 h-6"/> : <Icons.VolumeX className="w-6 h-6"/>}</button>
-                        </div>
-                        <div className="text-center">
-                            <h2 className="font-bold text-yellow-500 tracking-widest text-2xl">COUP FATAL</h2>
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1 bg-slate-800 px-2 py-1 rounded inline-block">{selectedCategory}</p>
-                        </div>
-                        <div className="w-32 text-right text-xs text-slate-500 hidden md:block">
-                            Quest: <span className="text-white font-bold">{currentQuestionIndex + 1}</span> / {questions.length}
-                        </div>
-                    </div>
-
-                    <div className={`grid ${getGridClass()} gap-4 mb-6`}>
-                        {players.map((player, index) => {
-                            const isActive = index === activePlayerIndex;
-                            const isEliminated = player.status === 'eliminated';
-                            const isDanger = player.time < 10 && !isEliminated;
-                            const progress = Math.min(100, (player.time / initialTime) * 100);
-                            const showPenalty = penaltyAnim && penaltyAnim.playerId === player.id;
-
-                            return (
-                                <div key={player.id} className={`relative p-4 rounded-2xl border-4 transition-all duration-300 flex flex-col items-center overflow-hidden ${isActive ? 'timer-active bg-blue-900/90' : 'border-slate-700 bg-slate-800/50 opacity-70'} ${isDanger ? 'timer-danger' : ''} ${isEliminated ? 'opacity-30 grayscale' : ''}`}>
-                                    <div className="w-full flex justify-between items-start z-10 mb-1">
-                                        <h3 className="text-lg font-bold truncate max-w-[70%]">{player.name}</h3>
-                                        {!isEliminated && (
-                                            <div className="flex gap-1" title="Jokers restants">
-                                                {[...Array(player.jokers)].map((_, i) => <Icons.Joker key={i} className="w-4 h-4 text-purple-400" />)}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    <div className={`text-6xl font-mono font-black z-10 tracking-tighter ${player.time < 10 && !isEliminated ? 'text-red-400' : 'text-white'}`}>
-                                        {isEliminated ? '00.0' : formatTime(player.time)}
-                                    </div>
-
-                                    {!isEliminated && <div className="absolute bottom-0 left-0 h-1.5 bg-gradient-to-r from-green-500 to-red-500 transition-all duration-100" style={{width: `${progress}%`}}></div>}
-                                    {isActive && !isEliminated && <div className="absolute -bottom-3 bg-yellow-500 text-black text-[10px] font-bold px-3 py-1 rounded-full z-20">EN JEU</div>}
-                                    {isEliminated && <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-red-500 font-black border-4 border-red-500 p-2 rounded rotate-12 z-20">ÉLIMINÉ</div>}
-                                    {showPenalty && <div key={penaltyAnim.id} className="penalty-anim">-2s</div>}
-
-                                    {isAdminMode && (
-                                        <div className="absolute -bottom-12 bg-slate-900 border border-slate-600 p-1 rounded-lg flex gap-2 z-30 shadow-xl">
-                                            <button onClick={() => adjustTime(player.id, -1)} className="bg-red-900 hover:bg-red-700 text-white text-xs px-2 py-1 rounded font-mono">-1</button>
-                                            <button onClick={() => adjustTime(player.id, 1)} className="bg-green-900 hover:bg-green-700 text-white text-xs px-2 py-1 rounded font-mono">+1</button>
-                                            <button onClick={() => adjustTime(player.id, 5)} className="bg-green-900 hover:bg-green-700 text-white text-xs px-2 py-1 rounded font-mono">+5</button>
-                                            <button onClick={() => resetPlayerTime(player.id)} className="bg-blue-900 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"><Icons.RotateCcw className="w-3 h-3"/></button>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    <div className="flex justify-center mb-6">
-                        <button onClick={toggleTimer} className={`flex items-center gap-3 px-8 py-4 rounded-full font-black text-xl shadow-lg transition-all transform hover:scale-105 ${isTimerRunning ? 'bg-orange-600 hover:bg-orange-500 text-white' : 'bg-green-500 hover:bg-green-400 text-slate-900 btn-pulse'}`}>
-                            {isTimerRunning ? <><Icons.Pause className="w-6 h-6" fill="currentColor" /> PAUSE</> : <><Icons.Play className="w-6 h-6" fill="currentColor" /> LANCER CHRONO</>}
-                        </button>
-                    </div>
-
-                    <div className="flex-1 flex flex-col items-center justify-start">
-                        <div className="w-full max-w-4xl card-glass rounded-3xl p-6 md:p-8 text-center border-t-4 border-yellow-500 shadow-2xl relative overflow-hidden">
-                            <div className={`transition-all duration-300 ${!isTimerRunning && antiCheatEnabled ? 'blur-content' : 'no-blur'}`}>
-                                <div className="flex justify-center gap-2 mb-4">
-                                    <span className="inline-block bg-blue-600 text-blue-100 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">{currentQ.category}</span>
-                                    <span className={`inline-block text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide badge-${currentQ.difficulty}`}>
-                                        {currentQ.difficulty}
-                                    </span>
-                                </div>
-                                <h2 className="text-2xl md:text-4xl font-bold mb-6 leading-tight min-h-[4rem]">{currentQ.question}</h2>
-                                <div className="bg-black/40 rounded-lg p-4 mb-6 inline-block min-w-[200px]">
-                                    <p className="text-slate-400 text-xs mb-1 uppercase font-bold">Réponse attendue</p>
-                                    <p className="text-xl md:text-2xl text-green-400 font-bold">{currentQ.answer}</p>
-                                </div>
-                            </div>
-
-                            {!isTimerRunning && antiCheatEnabled && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
-                                    <div className="bg-black/60 p-4 rounded-xl border border-slate-500 backdrop-blur-md flex flex-col items-center gap-2">
-                                        <Icons.EyeOff className="w-8 h-8 text-yellow-400"/>
-                                        <span className="font-bold text-yellow-400 uppercase tracking-widest">Question Masquée</span>
-                                        <span className="text-xs text-slate-300">Lancez le chrono pour voir</span>
-                                    </div>
-                                </div>
-                            )}
-                            
-                            <div className="flex justify-center gap-4 mt-2 w-full z-20 relative">
-                                <button onClick={handleWrong} className="flex-1 bg-red-600 hover:bg-red-500 text-white p-4 rounded-xl font-bold text-lg transition transform hover:scale-105 flex flex-col items-center justify-center gap-1 shadow-lg border-b-4 border-red-800 active:border-b-0 active:translate-y-1 group">
-                                    <Icons.XCircle className="w-6 h-6 group-hover:scale-110 transition"/>
-                                    <span>MAUVAIS (-2s)</span>
-                                </button>
-                                
-                                {currentPlayer && currentPlayer.jokers > 0 && (
-                                    <button onClick={handleJoker} className="bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-xl font-bold text-lg transition transform hover:scale-105 flex flex-col items-center justify-center gap-1 shadow-lg border-b-4 border-purple-800 active:border-b-0 active:translate-y-1 group" title="Utiliser Joker (Passe sans pénalité)">
-                                        <Icons.Joker className="w-6 h-6 group-hover:scale-110 transition"/>
-                                        <span>JOKER ({currentPlayer.jokers})</span>
-                                    </button>
-                                )}
-
-                                <button onClick={handleSkip} className="bg-slate-600 hover:bg-slate-500 text-white p-4 rounded-xl font-bold text-lg transition transform hover:scale-105 flex flex-col items-center justify-center gap-1 shadow-lg border-b-4 border-slate-800 active:border-b-0 active:translate-y-1" title="Passer la question sans impacter le score/temps">
-                                    <Icons.Skip className="w-6 h-6"/>
-                                    <span>PASSER</span>
-                                </button>
-                                <button onClick={handleCorrect} className="flex-1 bg-green-600 hover:bg-green-500 text-white p-4 rounded-xl font-bold text-lg transition transform hover:scale-105 flex flex-col items-center justify-center gap-1 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 group">
-                                    <Icons.CheckCircle className="w-6 h-6 group-hover:scale-110 transition"/>
-                                    <span>CORRECT</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
                     
-                    <div className="text-center text-slate-500 text-xs mt-4 mb-2">Question {currentQuestionIndex + 1} / {questions.length}</div>
+                    {gameState === 'setup' && (
+                        <div className="flex-1 flex flex-col items-center justify-center p-4 space-y-6">
+                            <h1 className="text-5xl font-black text-yellow-400 neon-text text-center mb-4">LE DUEL <span className="text-sm block text-blue-300 font-normal mt-2">Encyclopédie Stable</span></h1>
+                            <div className="flex flex-col md:flex-row gap-6 w-full max-w-6xl h-[70vh]">
+                                <div className="card-glass flex-1 p-6 rounded-2xl flex flex-col border-t-4 border-blue-500">
+                                    <div className="flex justify-between mb-4">
+                                        <h3 className="font-bold text-xl">Joueurs</h3>
+                                        <button onClick={addPlayer} className="bg-blue-600 p-1 rounded hover:bg-blue-500"><Icons.Plus className="w-5 h-5"/></button>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto space-y-4">
+                                        {players.map(p => (
+                                            <div key={p.id} className="bg-slate-800 p-3 rounded flex flex-col gap-2">
+                                                <div className="flex gap-2 items-center">
+                                                    <span className="font-bold w-6">{p.id}.</span>
+                                                    <input className="flex-1 bg-slate-900 p-2 rounded border border-slate-600" value={p.name} onChange={e => setPlayers(players.map(pl => pl.id === p.id ? {...pl, name: e.target.value} : pl))} />
+                                                    {players.length > 2 && <button onClick={() => removePlayer(p.id)} className="text-red-500"><Icons.Trash className="w-5 h-5"/></button>}
+                                                </div>
+                                                <div className="flex gap-2 items-center">
+                                                    <Icons.Image className="w-4 h-4 text-slate-400"/>
+                                                    <input className="flex-1 bg-slate-900 text-xs p-2 rounded border border-slate-600" placeholder="URL Avatar (https://...)" value={p.avatar} onChange={e => setPlayers(players.map(pl => pl.id === p.id ? {...pl, avatar: e.target.value} : pl))} />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 pt-4 border-t border-slate-600 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-slate-400">Temps (sec)</label>
+                                            <input type="number" value={settings.initialTime} onChange={e => setSettings({...settings, initialTime: parseInt(e.target.value)})} className="w-full bg-slate-900 p-2 rounded" />
+                                        </div>
+                                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setSettings({...settings, suddenDeath: !settings.suddenDeath})}>
+                                            <div className={`w-5 h-5 rounded border ${settings.suddenDeath ? 'bg-red-600 border-red-600' : 'border-slate-400'}`}></div>
+                                            <label className="text-xs font-bold text-red-400 flex items-center gap-1"><Icons.Skull className="w-3 h-3"/> Mort Subite</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="card-glass flex-1 p-6 rounded-2xl flex flex-col border-t-4 border-yellow-500">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="font-bold text-xl">Catégories</h3>
+                                        <button onClick={() => setShowImport(true)} className="text-xs bg-purple-600 hover:bg-purple-500 px-3 py-1 rounded flex items-center gap-1"><Icons.Upload className="w-3 h-3"/> Base de Données</button>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-2 content-start">
+                                        <button onClick={() => setSelectedCategory("TOUT MÉLANGER")} className={`p-2 rounded text-sm font-bold border-2 ${selectedCategory === "TOUT MÉLANGER" ? 'category-selected' : 'border-slate-600 hover:bg-slate-700'}`}>TOUT MÉLANGER</button>
+                                        {Object.values(categories).map(cat => cat !== "TOUT MÉLANGER" && (
+                                            <button key={cat} onClick={() => setSelectedCategory(cat)} className={`p-2 rounded text-sm font-bold border-2 ${selectedCategory === cat ? 'category-selected' : 'border-slate-600 hover:bg-slate-700'}`}>{cat}</button>
+                                        ))}
+                                    </div>
+                                    <button onClick={startGame} className="mt-4 w-full bg-gradient-to-r from-yellow-500 to-orange-500 py-4 rounded-xl font-black text-slate-900 text-xl hover:scale-105 transition flex items-center justify-center gap-2"><Icons.Play className="w-6 h-6"/> LANCER LE MATCH</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {gameState === 'playing' && (
+                        <div className="flex-1 flex flex-col p-4 max-w-7xl mx-auto w-full">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex gap-2">
+                                    <button onClick={() => setGameState('setup')} className="p-2 bg-slate-800 rounded hover:bg-slate-700"><Icons.Settings className="w-5 h-5"/></button>
+                                    <button onClick={() => setSettings({...settings, musicEnabled: !settings.musicEnabled})} className={`p-2 rounded ${settings.musicEnabled ? 'bg-blue-600' : 'bg-slate-800'}`}><Icons.Music className="w-5 h-5"/></button>
+                                    <button onClick={() => setIsAdminMode(!isAdminMode)} className={`p-2 rounded ${isAdminMode ? 'bg-red-600 animate-pulse' : 'bg-slate-800'}`}><Icons.Shield className="w-5 h-5"/></button>
+                                    {prevState && <button onClick={handleUndo} className="bg-slate-700 text-yellow-400 p-2 rounded flex items-center gap-1 font-bold animate-pulse"><Icons.Undo className="w-5 h-5"/> ANNULER ERREUR</button>}
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-yellow-500 font-black text-2xl tracking-widest">COUP FATAL</div>
+                                    <div className="text-xs text-slate-400 bg-slate-800 px-2 rounded">{selectedCategory}</div>
+                                </div>
+                                <div className="text-right text-xs text-slate-500">Q: <span className="text-white font-bold">{history.length + 1}</span></div>
+                            </div>
+
+                            <div className={`grid gap-6 mb-4 flex-1 items-center ${getGridClass()}`}>
+                                {players.map((p, idx) => {
+                                    const isActive = idx === activePlayerIndex;
+                                    const isDanger = p.time < 10 && p.status === 'alive';
+                                    const progress = Math.min(100, (p.time / settings.initialTime) * 100);
+
+                                    return (
+                                        <div key={p.id} className={`relative p-6 rounded-2xl border-4 flex flex-col items-center justify-center transition-all duration-300 h-full ${isActive ? 'timer-active bg-blue-900/80 scale-105' : 'border-slate-700 bg-slate-800/40 opacity-70'} ${isDanger ? 'timer-danger' : ''} ${p.status === 'eliminated' ? 'grayscale opacity-30' : ''}`}>
+                                            <div className="avatar-container">
+                                                {p.avatar ? <img src={p.avatar} className="avatar-img" /> : <div className="text-2xl font-bold text-slate-500">{p.name[0]}</div>}
+                                            </div>
+                                            <h3 className="mt-8 font-bold text-lg">{p.name}</h3>
+                                            <div className={`text-6xl font-mono font-black my-2 ${p.time < 5 ? 'text-red-500' : 'text-white'}`}>
+                                                {p.status === 'eliminated' ? '---' : <span>{Math.floor(p.time)}<span className="text-sm">.{Math.floor((p.time % 1) * 10)}</span></span>}
+                                            </div>
+                                            {!p.status === 'eliminated' && <div className="absolute bottom-0 left-0 h-1.5 bg-gradient-to-r from-green-500 to-red-500 transition-all duration-100" style={{width: `${progress}%`}}></div>}
+                                            {isActive && !p.status === 'eliminated' && <div className="absolute -bottom-3 bg-yellow-500 text-black text-[10px] font-bold px-3 py-1 rounded-full z-20">EN JEU</div>}
+                                            {isAdminMode && (
+                                                <div className="absolute -bottom-4 flex gap-1 bg-slate-900 p-1 rounded border border-slate-600 z-50">
+                                                    <button onClick={() => adjustTime(p.id, -1)} className="px-2 bg-red-600 text-xs">-1</button>
+                                                    <button onClick={() => adjustTime(p.id, 1)} className="px-2 bg-green-600 text-xs">+1</button>
+                                                    <button onClick={() => resetPlayerTime(p.id)} className="px-2 bg-blue-600 text-xs"><Icons.RotateCcw className="w-3 h-3"/></button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="flex justify-center mb-4">
+                                <button onClick={toggleTimer} className={`px-12 py-4 rounded-full font-black text-2xl shadow-lg flex items-center gap-3 hover:scale-105 transition-all ${isTimerRunning ? 'bg-orange-500 text-white' : 'bg-green-500 text-slate-900 btn-pulse border-4 border-green-300'}`}>
+                                    {isTimerRunning ? <><Icons.Pause className="w-8 h-8"/> PAUSE</> : <><Icons.Play className="w-8 h-8"/> TOP ! (Lancer)</>}
+                                </button>
+                            </div>
+
+                            <div className="w-full max-w-4xl mx-auto card-glass rounded-2xl p-6 border-t-4 border-yellow-500 relative overflow-hidden text-center min-h-[300px] flex flex-col justify-center">
+                                <div className="transition-all duration-300">
+                                    <div className="flex justify-center gap-2 mb-2">
+                                        <span className={`text-xs font-bold px-2 py-1 rounded badge-${qToRender.difficulty || 'Moyen'}`}>{qToRender.difficulty || 'Moyen'}</span>
+                                        <span className="text-xs font-bold px-2 py-1 rounded bg-blue-900 text-blue-200">{qToRender.category}</span>
+                                    </div>
+                                    <h2 className="text-3xl md:text-5xl font-black mb-8 leading-tight">{qToRender.question}</h2>
+                                    <div className="bg-black/60 inline-block px-6 py-4 rounded-xl mb-6 border border-slate-600">
+                                        <div className="text-xs text-slate-400 uppercase font-bold tracking-widest mb-1">Réponse attendue</div>
+                                        <div className="text-3xl text-green-400 font-bold">{qToRender.answer}</div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-4 mt-auto relative z-20 h-24">
+                                    <button onClick={handleWrong} className="flex-1 bg-red-600 hover:bg-red-500 rounded-xl font-black text-xl flex flex-col items-center justify-center shadow-lg border-b-8 border-red-800 active:border-b-0 active:translate-y-2 transition-all">
+                                        <div className="flex items-center gap-2"><Icons.XCircle className="w-8 h-8"/> MAUVAIS</div>
+                                        <span className="text-sm font-normal opacity-80">{settings.suddenDeath && players[activePlayerIndex]?.time < 5 ? '(MORT SUBITE)' : '(Passe)'}</span>
+                                    </button>
+                                    <button onClick={handleCorrect} className="flex-[2] bg-green-600 hover:bg-green-500 rounded-xl font-black text-3xl flex flex-col items-center justify-center shadow-lg border-b-8 border-green-800 active:border-b-0 active:translate-y-2 transition-all">
+                                        <div className="flex items-center gap-3"><Icons.CheckCircle className="w-10 h-10"/> CORRECT</div>
+                                        <span className="text-sm font-normal opacity-80 uppercase tracking-widest">Stop Chrono + Suivant</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {gameState === 'ended' && (
+                        <div className="flex-1 flex flex-col items-center justify-center p-4">
+                            <Icons.Trophy className="w-32 h-32 text-yellow-400 animate-bounce mb-6"/>
+                            <h2 className="text-3xl font-light">Vainqueur</h2>
+                            <h1 className="text-7xl font-black text-yellow-400 neon-text mb-12">{winner}</h1>
+                            <div className="flex gap-4">
+                                <button onClick={() => setGameState('setup')} className="bg-slate-700 px-6 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-600"><Icons.Settings className="w-5 h-5"/> Menu</button>
+                                <button onClick={restartGameSamePlayers} className="bg-blue-600 px-6 py-3 rounded-lg font-bold flex items-center gap-2 hover:bg-blue-500 shadow-lg hover:scale-105 transition"><Icons.Zap className="w-5 h-5"/> Revanche Rapide</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
